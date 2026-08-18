@@ -574,8 +574,8 @@
 
   // ── Step 6: Donor Call Ingestion ────────────────────────────────────────
   async function handleIngestCall() {
-    const file = el.callFileInput.files[0];
-    if (!file) { alert('Select a donor call PDF first.'); return; }
+    const files = el.callFileInput.files;
+    if (!files || !files.length) { alert('Select at least one donor call document (PDF/DOCX/MD).'); return; }
     const callId = el.callIdInput.value.trim() || `call_${Date.now().toString(36)}`;
     const displayName = el.callNameInput.value.trim() || callId;
 
@@ -583,7 +583,7 @@
     el.btnIngestCall.textContent = 'Extracting requirements...';
     try {
       const fd = new FormData();
-      fd.append('file', file);
+      for (const f of files) fd.append('files', f);
       fd.append('call_id', callId);
       fd.append('display_name', displayName);
       const res = await fetch('/api/calls/ingest', { method: 'POST', body: fd });
@@ -1095,13 +1095,46 @@
   }
 
   async function createNewProposal() {
+    // Open the picker modal: published calls / ready donors / upload new
+    await loadPublishedCalls();
+    document.getElementById('newProposalModal').style.display = 'flex';
+  }
+
+  async function loadPublishedCalls() {
+    const listEl = document.getElementById('publishedCallsList');
+    try {
+      const res = await api('/api/calls/published');
+      const published = res.published || [];
+      if (!published.length) {
+        listEl.innerHTML = '<div style="color:var(--text-secondary); font-size:12.5px;">No published calls yet — upload one below or use a ready donor.</div>';
+        return;
+      }
+      listEl.innerHTML = published.map(c => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border); font-size:12.5px;">
+          <div>
+            <strong>${esc(c.display_name)}</strong>
+            <div style="color:var(--text-secondary); font-size:11px;">${esc(c.call_id)} • deadline ${esc(c.deadline || '—')}</div>
+          </div>
+          <button class="btn btn-sm btn-primary" data-call="${esc(c.call_id)}">Use This Call</button>
+        </div>
+      `).join('');
+      listEl.querySelectorAll('[data-call]').forEach(b => b.addEventListener('click', () => {
+        document.getElementById('newProposalModal').style.display = 'none';
+        createProposalWithDonor(b.dataset.call);
+      }));
+    } catch (e) {
+      listEl.innerHTML = `<div style="color:var(--red); font-size:12.5px;">Failed to load calls: ${esc(e.message)}</div>`;
+    }
+  }
+
+  async function createProposalWithDonor(donor) {
     try {
       const res = await api('/api/proposals/new', {
         method: 'POST',
         body: JSON.stringify({
           title: 'Emergency Multi-Sectoral Humanitarian Response',
           country: 'Sudan',
-          donor: 'OCHA_CBPF',
+          donor,
           theme: 'WASH & Protection',
         }),
       });
@@ -1110,7 +1143,6 @@
       opt.value = newProp.id;
       opt.textContent = `${newProp.title} (${newProp.donor})`;
       el.proposalSelect.prepend(opt);
-
       await loadProposal(newProp.id);
     } catch (e) {
       alert(`Error creating proposal: ${e.message}`);
@@ -1186,6 +1218,36 @@
 
     // Step 6: Donor Call Ingestion
     el.btnIngestCall.addEventListener('click', handleIngestCall);
+
+    // New Proposal modal
+    document.getElementById('btnCloseNewProposal').addEventListener('click', () => {
+      document.getElementById('newProposalModal').style.display = 'none';
+    });
+    document.querySelectorAll('.ready-donor').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.getElementById('newProposalModal').style.display = 'none';
+        createProposalWithDonor(btn.dataset.donor);
+      });
+    });
+    document.getElementById('btnModalIngest').addEventListener('click', async () => {
+      const files = document.getElementById('modalCallFiles').files;
+      if (!files || !files.length) { alert('Select at least one document.'); return; }
+      const fd = new FormData();
+      for (const f of files) fd.append('files', f);
+      fd.append('call_id', `call_${Date.now().toString(36)}`);
+      fd.append('display_name', 'New Donor Call');
+      try {
+        const res = await fetch('/api/calls/ingest', { method: 'POST', body: fd });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+        document.getElementById('newProposalModal').style.display = 'none';
+        renderCallIngestResult(body);
+        loadCallDrafts();
+        setStep(6);
+      } catch (e) {
+        alert(`Ingest failed: ${e.message}`);
+      }
+    });
 
     // Proposal Select & New
     el.proposalSelect.addEventListener('change', e => {

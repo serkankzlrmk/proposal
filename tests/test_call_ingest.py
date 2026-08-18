@@ -248,6 +248,57 @@ def test_api_ingest_returns_review_draft(client):
     assert body["manifest_draft"]["hard_eligibility_gates"].get("psea_policy_mandatory") is True
 
 
+def test_api_ingest_multiple_formats(client):
+    """docx + md + pdf all accepted in one multi-file upload."""
+    from engine.call_ingest import extract_document_text
+
+    # DOCX bytes (minimal valid docx: zip with word/document.xml)
+    import zipfile
+
+    docx_buf = io.BytesIO()
+    with zipfile.ZipFile(docx_buf, "w") as z:
+        z.writestr("word/document.xml",
+                   '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                   '<w:body><w:p><w:r><w:t>DOCX requirement: PSEA policy mandatory</w:t></w:r></w:p></w:body></w:document>')
+    docx_bytes = docx_buf.getvalue()
+
+    md_bytes = b"# Call Guidelines\n\nDeadline: 15 June 2026\n\nSADD disaggregation required."
+
+    r = client.post("/api/calls/ingest", data={
+        "files": [
+            (io.BytesIO(docx_bytes), "guidelines.docx"),
+            (io.BytesIO(md_bytes), "annex.md"),
+        ],
+        "call_id": "multi_format_call",
+        "display_name": "Multi Format Call",
+    }, content_type="multipart/form-data")
+    assert r.status_code == 201, r.json
+    body = r.json
+    assert body["documents_accepted"] == 2
+    assert body["manifest_draft"]["donor_id"] == "multi_format_call"
+    # Both formats' content reached the extractor
+    assert "PSEA" in body["summary"] or "psea" in str(body["requirements"]).lower() or "SADD" in body["summary"]
+
+
+def test_extract_document_text_formats():
+    """extract_document_text handles pdf/docx/md; rejects others."""
+    from engine.call_ingest import extract_document_text
+
+    # md
+    assert "hello" in extract_document_text(b"hello world", "notes.md")
+    # docx
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("word/document.xml",
+                   '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                   '<w:body><w:p><w:r><w:t>DOCX text here</w:t></w:r></w:p></w:body></w:document>')
+    assert "DOCX text here" in extract_document_text(buf.getvalue(), "form.docx")
+    # unsupported
+    assert extract_document_text(b"x", "notes.xlsx") == ""
+
+
 def test_api_publish_then_engine_scores(client, tmp_path, monkeypatch):
     monkeypatch.setattr("engine.call_ingest.DONORS_DIR", tmp_path)
     pdf = make_pdf_bytes(CALL_TEXT)

@@ -723,3 +723,15 @@ body {
 .risk-amber { background: #fde68a; color: #b45309; }
 .risk-green { background: #bbf7d0; color: #15803d; }
 .budget-overhead-banner.limit-exceeded { font-weight: 600; }
+
+/* ── New Proposal Modal ─────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(15,23,42,0.6);
+  display: flex; align-items: center; justify-content: center; z-index: 100;
+  backdrop-filter: blur(4px);
+}
+.modal-card {
+  background: var(--bg-card, #0f172a); border: 1px solid var(--border);
+  border-radius: 10px; padding: 20px; width: 560px; max-width: 92vw;
+  max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+}

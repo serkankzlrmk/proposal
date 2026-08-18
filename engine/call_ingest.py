@@ -57,6 +57,52 @@ def extract_pdf_text(pdf_bytes: bytes, max_chars: int = 120_000) -> str:
     return (text or "")[:max_chars]
 
 
+# ── Multi-format document extraction (pdf | docx | md) ────────────────────
+SUPPORTED_EXTENSIONS = (".pdf", ".docx", ".md", ".markdown", ".txt")
+
+
+def extract_document_text(data: bytes, filename: str, max_chars: int = 120_000) -> str:
+    """Extract text from a donor call document by extension.
+
+    pdf  -> pymupdf
+    docx -> zipfile + XML paragraph walk (no python-docx dependency)
+    md/txt -> plain text
+    Unsupported extensions return "" (caller decides).
+    """
+    name = (filename or "").lower()
+    if name.endswith(".pdf"):
+        return extract_pdf_text(data, max_chars=max_chars)
+    if name.endswith(".docx"):
+        return _extract_docx_text(data, max_chars=max_chars)
+    if name.endswith((".md", ".markdown", ".txt")):
+        try:
+            return (data.decode("utf-8", errors="ignore") or "")[:max_chars]
+        except Exception as e:
+            logger.warning("Text extraction failed: %s", e)
+            return ""
+    logger.warning("Unsupported document type: %s", filename)
+    return ""
+
+
+def _extract_docx_text(data: bytes, max_chars: int = 120_000) -> str:
+    """Extract paragraph text from a .docx (zip + XML, no python-docx)."""
+    import re
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(__import__("io").BytesIO(data)) as z:
+            xml = z.read("word/document.xml").decode("utf-8", errors="ignore")
+    except Exception as e:
+        logger.warning("DOCX extraction failed: %s", e)
+        return ""
+    paras = re.findall(r"<w:p[^>]*>(.*?)</w:p>", xml, re.S)
+    out = []
+    for p in paras:
+        texts = re.findall(r"<w:t[^>]*>([^<]*)</w:t>", p)
+        out.append("".join(texts))
+    return "\n".join(t for t in out if t.strip())[:max_chars]
+
+
 # ── LLM extraction (OpenRouter; graceful fallback to regex) ───────────────
 _EXTRACTION_SCHEMA_HINT = """
 Return ONLY a JSON object:

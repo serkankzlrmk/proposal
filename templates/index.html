@@ -273,8 +273,8 @@
 
           <div class="glass-card">
             <div class="form-group">
-              <label class="form-label" for="callFileInput">Donor Call PDF</label>
-              <input type="file" id="callFileInput" class="input-text" accept=".pdf" style="padding: 8px;">
+              <label class="form-label" for="callFileInput">Donor Call Documents (PDF, DOCX, MD — multiple allowed)</label>
+              <input type="file" id="callFileInput" class="input-text" accept=".pdf,.docx,.md,.markdown,.txt" multiple style="padding: 8px;">
             </div>
             <div class="form-grid">
               <div class="form-group">
@@ -322,6 +322,41 @@
     </aside>
 
   </main>
+
+  <!-- New Proposal Modal: pick a published call, upload a new one, or use a ready donor -->
+  <div id="newProposalModal" class="modal-overlay" style="display:none;">
+    <div class="modal-card">
+      <div class="step-header-area" style="margin-bottom: 12px;">
+        <div>
+          <h2 class="step-title">New Proposal</h2>
+          <p class="step-subtitle">Start from a donor call (recommended) or a ready donor framework.</p>
+        </div>
+        <button class="btn btn-sm" id="btnCloseNewProposal">✕</button>
+      </div>
+
+      <!-- Published calls -->
+      <h3 style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px;">Published Donor Calls</h3>
+      <div id="publishedCallsList" style="max-height: 180px; overflow-y: auto; margin-bottom: 12px;">
+        <div style="color:var(--text-secondary); font-size:12.5px;">Loading...</div>
+      </div>
+
+      <!-- Ready donors -->
+      <h3 style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px;">Ready Donor Frameworks</h3>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom: 12px;">
+        <button class="btn btn-sm ready-donor" data-donor="OCHA_CBPF">OCHA CBPF</button>
+        <button class="btn btn-sm ready-donor" data-donor="USAID_BHA">USAID BHA</button>
+        <button class="btn btn-sm ready-donor" data-donor="EU_PRAG">EU PRAG</button>
+        <button class="btn btn-sm ready-donor" data-donor="generic">Generic</button>
+      </div>
+
+      <!-- Upload new call -->
+      <h3 style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px;">Or Upload a New Call</h3>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input type="file" id="modalCallFiles" class="input-text" accept=".pdf,.docx,.md,.markdown,.txt" multiple style="flex:1; padding:8px;">
+        <button class="btn btn-sm btn-primary" id="btnModalIngest">Ingest</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Main Vanilla JS Coordinator -->
   <script src="/static/js/app.js"></script>

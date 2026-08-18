@@ -27,7 +27,7 @@ from flask import Blueprint, jsonify, request
 try:
     from config import DB_PATH
     from engine.call_ingest import (
-        extract_pdf_text,
+        extract_document_text,
         extract_requirements,
         build_manifest_draft,
         save_manifest,
@@ -36,7 +36,7 @@ try:
 except ImportError:
     from proposal.config import DB_PATH
     from proposal.engine.call_ingest import (
-        extract_pdf_text,
+        extract_document_text,
         extract_requirements,
         build_manifest_draft,
         save_manifest,
@@ -78,22 +78,46 @@ def _init_table() -> None:
 
 @call_ingest_bp.route("/ingest", methods=["POST"])
 def ingest_call():
-    """Upload a donor call PDF -> extract requirements -> review draft."""
+    """Upload donor call documents (pdf/docx/md, MULTIPLE) -> review draft.
+
+    All uploaded files are concatenated (in upload order) into one text
+    corpus before requirement extraction — a call often ships as
+    guidelines.pdf + application_form.docx + indicators.md.
+    """
     _init_table()
-    file = request.files.get("file")
-    filename = (file.filename or "") if file else ""
-    if not file or not filename.lower().endswith(".pdf"):
-        return jsonify({"error": "A .pdf file field named 'file' is required"}), 400
+    files = request.files.getlist("files")
+    if not files:
+        # Backward compat: single 'file' field
+        single = request.files.get("file")
+        if single:
+            files = [single]
+    if not files:
+        return jsonify({"error": "At least one document required (fields 'files' or 'file')"}), 400
 
     call_id = (request.form.get("call_id") or "").strip() or f"call_{uuid.uuid4().hex[:8]}"
     display_name = (request.form.get("display_name") or "").strip() or f"Custom Donor Call ({call_id})"
 
-    pdf_bytes = file.read()
-    text = extract_pdf_text(pdf_bytes)
-    if not text.strip():
-        return jsonify({"error": "No extractable text in PDF (scanned images unsupported — OCR is a later phase)"}), 422
+    # Concatenate all documents into one corpus
+    corpus_parts = []
+    accepted = 0
+    for f in files:
+        filename = (f.filename or "")
+        if not filename:
+            continue
+        data = f.read()
+        text = extract_document_text(data, filename)
+        if text.strip():
+            corpus_parts.append(f"===== {filename} =====\n{text}")
+            accepted += 1
+        else:
+            logger.warning("No extractable text from %s (unsupported or empty)", filename)
+    if not corpus_parts:
+        return jsonify({
+            "error": "No extractable text in uploaded documents. Supported: PDF, DOCX, MD/TXT (scanned-image PDFs need OCR — later phase)."
+        }), 422
 
-    extracted = extract_requirements(text)
+    corpus = "\n\n".join(corpus_parts)
+    extracted = extract_requirements(corpus)
     draft = build_manifest_draft(call_id, display_name, extracted)
 
     draft_id = f"draft_{uuid.uuid4().hex[:10]}"
@@ -119,11 +143,27 @@ def ingest_call():
         "status": "review",
         "draft_id": draft_id,
         "call_id": call_id,
+        "documents_accepted": accepted,
         "summary": extracted.get("summary", ""),
         "requirements": extracted.get("requirements") or [],
         "deadline": extracted.get("deadline", ""),
         "manifest_draft": draft,
     }), 201
+
+
+@call_ingest_bp.route("/published", methods=["GET"])
+def list_published():
+    """List published donor manifests (for the new-proposal picker)."""
+    _init_table()
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, call_id, display_name, deadline, created_at "
+            "FROM call_drafts WHERE status = 'published' ORDER BY updated_at DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+    return jsonify({"published": [dict(r) for r in rows]})
 
 
 @call_ingest_bp.route("/drafts", methods=["GET"])
