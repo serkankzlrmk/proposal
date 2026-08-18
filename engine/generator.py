@@ -16,6 +16,36 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# ── Reference formatting (NotebookLM Step B: auto-populate references[]) ──
+def format_source_id(source: str, country: str, year: str = "2026") -> str:
+    """Format a canonical source id, e.g. format_source_id('HDX','Sudan') -> 'HDX_SUDAN_2026'."""
+    src = source.upper().replace(" ", "_")
+    ctry = country.upper().replace(" ", "_")
+    return f"{src}_{ctry}_{year}"
+
+
+def append_references(references: List[Dict[str, Any]], sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Deduplicate-append source entries to a references registry.
+
+    Each source: {"id": ..., "title": ..., "url": ...}
+    Returns the updated list (safe to store as proposal.references).
+    """
+    registry = list(references or [])
+    seen = {str(r.get("id", "")).upper() for r in registry if isinstance(r, dict)}
+    for s in sources:
+        if not isinstance(s, dict):
+            continue
+        sid = str(s.get("id") or "").strip()
+        if not sid or sid.upper() in seen:
+            continue
+        registry.append({
+            "id": sid,
+            "title": str(s.get("title") or ""),
+            "url": str(s.get("url") or ""),
+        })
+        seen.add(sid.upper())
+    return registry
+
 
 def _call_llm(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> str:
     """Call OpenRouter or LLM provider with fallback heuristics."""

@@ -224,9 +224,56 @@ def handle_verify(proposal_id: str):
     return jsonify({"status": "ok", "audit": audit, "proposal": updated})
 
 
+@proposal_api_bp.route("/<proposal_id>/references", methods=["POST"])
+def add_references(proposal_id: str):
+    """Append source entries to proposal.references[] (auto + manual).
+
+    Body: {"sources": [{"id": "HDX_SUDAN_2026", "title": "...", "url": "..."}, ...]}
+    Deduplicates by source id. Returns the updated reference registry.
+    """
+    prop = get_proposal(proposal_id)
+    if not prop:
+        return jsonify({"error": "Proposal not found"}), 404
+
+    data = request.get_json(force=True, silent=True) or {}
+    sources = data.get("sources") or []
+    if not isinstance(sources, list):
+        return jsonify({"error": "sources must be a list"}), 400
+
+    registry = prop.get("references") or []
+    seen = {str(r.get("id", "")).upper() for r in registry if isinstance(r, dict)}
+    added = []
+    for s in sources:
+        if not isinstance(s, dict):
+            continue
+        sid = str(s.get("id") or "").strip()
+        if not sid:
+            continue
+        if sid.upper() in seen:
+            continue
+        entry = {
+            "id": sid,
+            "title": str(s.get("title") or ""),
+            "url": str(s.get("url") or ""),
+            "added_at": __import__("time").time(),
+        }
+        registry.append(entry)
+        seen.add(sid.upper())
+        added.append(entry)
+
+    updated = update_proposal(proposal_id, {"references": registry}) or {}
+    return jsonify({"status": "ok", "added": added, "references": updated.get("references", [])})
+
+
 @proposal_api_bp.route("/<proposal_id>/advisor/chat", methods=["POST"])
 def handle_advisor_chat(proposal_id: str):
-    """Interactive Advisor chat session."""
+    """Interactive Advisor chat session.
+
+    When the client supplies an analysis run (or we can build one on the fly),
+    the chat receives a token-efficient AdvisorContext with diagnostics +
+    remediation prompts. The LLM returns a structured RemediationSuggestion
+    (suggested_text + rationale) that the frontend can apply and re-score.
+    """
     prop = get_proposal(proposal_id)
     if not prop:
         return jsonify({"error": "Proposal not found"}), 404
@@ -235,7 +282,27 @@ def handle_advisor_chat(proposal_id: str):
     user_msg = data.get("message", "")
     history = data.get("history", [])
 
-    result = advisor_chat(prop, user_msg, chat_history=history)
+    # Build AdvisorContext from the deterministic engine (Step B)
+    try:
+        from engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine
+        from engine.advisor_context import AdvisorContextBuilder
+
+        donor_key = (prop.get("donor") or "OCHA_CBPF").lower().replace("_", "")
+        alias_map = {"ochacbpf": "ocha_cbpf", "usaidbha": "usaid_bha", "euprag": "eu_prag"}
+        yaml_donor = alias_map.get(donor_key, donor_key)
+
+        loader = YamlDonorRuleLoader()
+        manifest = loader.load(yaml_donor)
+        engine = DonorScoringEngine(loader)
+        engine_result = engine.score(yaml_donor, prop)
+
+        builder = AdvisorContextBuilder(yaml_donor, manifest)
+        advisor_ctx = builder.build(engine_result, prop)
+    except Exception as e:
+        logger.warning("AdvisorContext build failed (%s); falling back to plain chat", e)
+        advisor_ctx = None
+
+    result = advisor_chat(prop, user_msg, chat_history=history, advisor_ctx=advisor_ctx)
     return jsonify(result)
 
 

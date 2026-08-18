@@ -570,22 +570,63 @@
     bubble.className = `msg-bubble ${role === 'user' ? 'msg-user' : 'msg-advisor'}`;
     bubble.innerHTML = `<div>${esc(text).replace(/\n/g, '<br>')}</div>`;
 
-    if (patch && patch.action === 'update_logframe') {
-      const patchBox = document.createElement('div');
-      patchBox.className = 'patch-box';
-      patchBox.innerHTML = `
-        <div class="patch-header">Recommended Logframe Refinement</div>
-        <div class="patch-content">Row ${patch.row_index + 1} (${patch.field}): "${esc(patch.suggested_value)}"</div>
-        <button class="btn btn-sm btn-primary" style="margin-top:6px; align-self:flex-start;">Apply Refinement to Logframe</button>
-      `;
-      patchBox.querySelector('button').addEventListener('click', () => {
-        applyLogframePatch(patch);
-      });
-      bubble.appendChild(patchBox);
+    if (patch) {
+      let patchBox = null;
+      if (patch.action === 'update_logframe') {
+        patchBox = document.createElement('div');
+        patchBox.className = 'patch-box';
+        patchBox.innerHTML = `
+          <div class="patch-header">Recommended Logframe Refinement</div>
+          <div class="patch-content">Row ${patch.row_index + 1} (${patch.field}): "${esc(patch.suggested_value)}"</div>
+          <button class="btn btn-sm btn-primary" style="margin-top:6px; align-self:flex-start;">Apply Refinement to Logframe</button>
+        `;
+        patchBox.querySelector('button').addEventListener('click', () => {
+          applyLogframePatch(patch);
+        });
+      } else if (patch.action === 'apply_suggestion' && patch.section_key && patch.suggested_text) {
+        // Step B: generic remediation diff (narrative section, budget, logframe cell)
+        patchBox = document.createElement('div');
+        patchBox.className = 'patch-box';
+        patchBox.innerHTML = `
+          <div class="patch-header">Suggested ${esc(patch.rule_type || 'Refinement')}</div>
+          <div class="patch-content">${esc(patch.suggested_text)}</div>
+          ${patch.rationale ? `<div class="patch-rationale"><em>Why:</em> ${esc(patch.rationale)}</div>` : ''}
+          <button class="btn btn-sm btn-primary" style="margin-top:6px; align-self:flex-start;">Apply Suggestion & Re-Score</button>
+        `;
+        patchBox.querySelector('button').addEventListener('click', () => {
+          applySuggestionPatch(patch);
+        });
+      }
+      if (patchBox) bubble.appendChild(patchBox);
     }
 
     el.advisorMessages.appendChild(bubble);
     el.advisorMessages.scrollTop = el.advisorMessages.scrollHeight;
+  }
+
+  // ── Step B: Apply generic remediation diff → autosave → instant re-score ──
+  async function applySuggestionPatch(patch) {
+    if (!patch.section_key || !patch.suggested_text) return;
+    const field = patch.field || 'text';
+
+    // Logframe cell (logframe.outcomes.N)
+    const lfMatch = patch.section_key.match(/^logframe\.outcomes\.(\d+)$/);
+    if (lfMatch && state.proposal?.logframe_data?.matrix) {
+      const r = parseInt(lfMatch[1], 10);
+      if (state.proposal.logframe_data.matrix[r]) {
+        state.proposal.logframe_data.matrix[r][field] = patch.suggested_text;
+        renderLogframe();
+      }
+    } else {
+      // Narrative section (or budget note)
+      state.proposal.narrative_data = state.proposal.narrative_data || {};
+      state.proposal.narrative_data[patch.section_key] = patch.suggested_text;
+      if (state.currentStep === 4) renderNarrative();
+    }
+
+    await saveCurrentState();
+    appendAdvisorBubble('advisor', `✓ Applied suggestion to "${patch.section_key}". Re-scoring now...`);
+    await runScoreAnalysis();  // instant POST /analyze re-score
   }
 
   function applyLogframePatch(patch) {

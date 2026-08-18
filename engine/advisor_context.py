@@ -51,6 +51,7 @@ class Diagnostic(BaseModel):
     severity: str = "WARNING"  # ERROR | WARNING | INFO
     failed_aspects: List[str] = Field(default_factory=list)
     raw_text_snippet: str = ""
+    current_text: str = ""  # Step B: full text of the offending block
     missing_elements: List[str] = Field(default_factory=list)
     invalid_citations: List[str] = Field(default_factory=list)
     registry_status: str = "DRAFT_MODE"  # DRAFT_MODE | REGISTRY_VERIFIED
@@ -58,6 +59,7 @@ class Diagnostic(BaseModel):
     threshold: Optional[float] = None
     actual: Optional[float] = None
     delta: Optional[float] = None
+    remediation_prompt: str = ""  # Step B: donor-specific actionable ask
 
 
 class RegistryEntry(BaseModel):
@@ -85,6 +87,17 @@ class AdvisorContext(BaseModel):
     @property
     def is_blocked(self) -> bool:
         return self.gate_evaluation.status == "AUTOMATIC_REJECTION"
+
+
+class RemediationSuggestion(BaseModel):
+    """Structured diff/proposal returned by the Advisor LLM (Step B)."""
+
+    section_key: str
+    rule_type: str
+    field: str = "text"
+    suggested_text: str
+    rationale: str = ""
+    row_index: Optional[int] = None  # for logframe matrix rows
 
 
 # ── Bridge: raw engine output -> AdvisorContext ────────────────────────────
@@ -162,6 +175,12 @@ class AdvisorContextBuilder:
             text = str(row.get("indicators", ""))
             failed = [dim for dim, pat in self._SMART_PATTERNS.items() if not pat.search(text)]
             if failed:
+                missing = [
+                    "Measurable target (number and unit missing)" if "measurable" in failed else "",
+                    "Time-bound indicator (timeframe not specified)" if "time_bound" in failed else "",
+                    "Disaggregation tags (gender/age/SADD)" if "disaggregation" in failed else "",
+                ]
+                missing = [m for m in missing if m]
                 diags.append(
                     Diagnostic(
                         section_key=f"logframe.outcomes.{idx}",
@@ -169,11 +188,14 @@ class AdvisorContextBuilder:
                         severity="ERROR" if "measurable" in failed or "time_bound" in failed else "WARNING",
                         failed_aspects=failed,
                         raw_text_snippet=text[:200],
-                        missing_elements=[
-                            "Measurable target (number and unit missing)" if "measurable" in failed else "",
-                            "Time-bound indicator (timeframe not specified)" if "time_bound" in failed else "",
-                            "Disaggregation tags (gender/age/SADD)" if "disaggregation" in failed else "",
-                        ][:3],
+                        current_text=text,
+                        missing_elements=missing,
+                        remediation_prompt=(
+                            f"Rewrite indicator row {idx} to satisfy: {', '.join(failed)}. "
+                            "Include a quantified target with unit, an explicit timeframe, "
+                            "and gender/age disaggregation where applicable. "
+                            "Return ONLY a replacement indicator text."
+                        ),
                     )
                 )
 
@@ -193,6 +215,12 @@ class AdvisorContextBuilder:
                         severity="WARNING",
                         invalid_citations=invalid[:5],
                         registry_status="REGISTRY_VERIFIED",
+                        current_text=text,
+                        remediation_prompt=(
+                            f"Fix invalid citations in section '{sec_key}': {', '.join(invalid[:5])}. "
+                            "Replace them with valid source IDs from the available registry. "
+                            "Return ONLY the corrected section text."
+                        ),
                     )
                 )
 
@@ -210,6 +238,11 @@ class AdvisorContextBuilder:
                     threshold=float(cap),
                     actual=float(actual_overhead),
                     delta=round(float(actual_overhead) - float(cap), 2),
+                    current_text=f"Overhead: {actual_overhead}% (cap {cap}%)",
+                    remediation_prompt=(
+                        f"Reduce overhead from {actual_overhead}% to at most {cap}%. "
+                        "Return ONLY a budget note with the corrected overhead percentage."
+                    ),
                 )
             )
 
@@ -255,5 +288,15 @@ def build_advisor_system_prompt(advisor_ctx: AdvisorContext) -> str:
     lines.append(
         "Your job: propose concrete, donor-compliant revisions for the diagnosed "
         "issues. Do NOT invent references — use only the available registry."
+    )
+    lines.append(
+        "When you recommend a specific edit, end your reply with a JSON patch block:\n"
+        "```json\n"
+        '{"action": "apply_suggestion", "section_key": "<diagnostic section_key>", '
+        '"rule_type": "<SMART_VALIDATION|CITATION_REGISTRY|BUDGET_CAP|QUOTA>", '
+        '"field": "text|indicators", "suggested_text": "<full replacement text>", '
+        '"rationale": "<one-line why>", "row_index": <optional number>}\n'
+        "```\n"
+        "The suggested_text MUST fully replace the offending content."
     )
     return "\n".join(lines)

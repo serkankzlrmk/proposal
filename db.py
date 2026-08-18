@@ -49,6 +49,7 @@ def init_db() -> None:
                 narrative_data TEXT NOT NULL DEFAULT '{}',
                 budget_data   TEXT NOT NULL DEFAULT '{"items":[],"total":0}',
                 review_data   TEXT NOT NULL DEFAULT '{}',
+                references_data TEXT NOT NULL DEFAULT '[]',
                 created_at    REAL NOT NULL,
                 updated_at    REAL NOT NULL
             );
@@ -67,6 +68,14 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_rev_prop ON proposal_reviews(proposal_id);
         """)
     conn.close()
+    # Idempotent migration for existing databases (references_data column)
+    conn = get_db_connection()
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(proposals)").fetchall()]
+    if "references_data" not in cols:
+        conn.execute("ALTER TABLE proposals ADD COLUMN references_data TEXT NOT NULL DEFAULT '[]'")
+        conn.commit()
+        logger.info("Migration: added references_data column")
+    conn.close()
     logger.info("Proposal SQLite DB initialized at %s", DB_PATH)
 
 
@@ -79,6 +88,12 @@ def _row_to_proposal_dict(row: sqlite3.Row) -> Dict[str, Any]:
                 d[json_col] = json.loads(d[json_col])
             except Exception:
                 d[json_col] = {}
+    if "references_data" in d and isinstance(d["references_data"], str):
+        try:
+            d["references"] = json.loads(d["references_data"])
+        except Exception:
+            d["references"] = []
+        del d["references_data"]
     return d
 
 
@@ -151,8 +166,8 @@ def create_proposal(
                 INSERT INTO proposals (
                     id, user_id, title, country, donor, theme, status, step,
                     context_data, toc_data, logframe_data, narrative_data, budget_data, review_data,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?, ?, ?, ?, ?, ?, ?)
+                    references_data, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     prop_id,
@@ -167,6 +182,7 @@ def create_proposal(
                     narrative_str,
                     budget_str,
                     review_str,
+                    "[]",
                     now,
                     now,
                 ),
@@ -192,12 +208,15 @@ def update_proposal(proposal_id: str, fields: Dict[str, Any], user_id: Optional[
         "narrative_data",
         "budget_data",
         "review_data",
+        "references",
     }
     updates = {}
     for k, v in fields.items():
         if k in allowed_cols:
             if k in ("context_data", "toc_data", "logframe_data", "narrative_data", "budget_data", "review_data"):
                 updates[k] = json.dumps(v) if not isinstance(v, str) else v
+            elif k == "references":
+                updates["references_data"] = json.dumps(v) if not isinstance(v, str) else v
             else:
                 updates[k] = v
 
