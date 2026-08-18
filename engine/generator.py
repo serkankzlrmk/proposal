@@ -16,6 +16,44 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+# ── Donor manifest context (call-aware generation) ────────────────────────
+def _donor_manifest_context(donor: str) -> str:
+    """Render the donor manifest requirements for LLM prompt injection.
+
+    Loads the canonical root-level manifest (call-ingested donors included)
+    and renders what the donor actually requires — mandatory sections,
+    keywords, citation ratio, overhead cap, hard gates — so the generator
+    writes FOR that donor. Empty string on any failure (zero-crash).
+    """
+    try:
+        from engine.yaml_rules import YamlDonorRuleLoader
+
+        alias_map = {"ochacbpf": "ocha_cbpf", "usaidbha": "usaid_bha", "euprag": "eu_prag"}
+        candidate = (donor or "OCHA_CBPF").lower()
+        # Resolution order: exact id first (call-ingested donors keep their
+        # underscored ids like ech_sudan_2026), then legacy alias, then
+        # underscore-stripped normalization, then loader fallback.
+        yaml_donor = alias_map.get(candidate.replace("_", ""), candidate)
+        loader = YamlDonorRuleLoader()
+        if yaml_donor not in loader.list_donors() and candidate != yaml_donor:
+            yaml_donor = candidate
+        manifest = loader.load(yaml_donor)
+        lines = [
+            f"Donor: {manifest.display_name}",
+            f"Mandatory sections: {', '.join(manifest.mandatory_sections) or 'none'}",
+            f"Mandatory keywords: {', '.join(manifest.mandatory_keywords) or 'none'}",
+            f"Min source citation ratio: {manifest.min_source_ratio}",
+            f"Overhead cap: {manifest.overhead_cap_percent}%",
+        ]
+        gates = manifest.hard_eligibility_gates or {}
+        if gates:
+            lines.append("Hard eligibility gates: " + ", ".join(f"{k}={v}" for k, v in gates.items()))
+        return "\n".join(lines)
+    except Exception as e:
+        logger.debug("Donor manifest context unavailable: %s", e)
+        return ""
+
 # ── Reference formatting (NotebookLM Step B: auto-populate references[]) ──
 def format_source_id(source: str, country: str, year: str = "2026") -> str:
     """Format a canonical source id, e.g. format_source_id('HDX','Sudan') -> 'HDX_SUDAN_2026'."""
@@ -83,11 +121,15 @@ def generate_toc(context_data: Dict[str, Any], donor: str = "OCHA_CBPF") -> Dict
     country = context_data.get("country", "Target Region")
     theme = context_data.get("theme", "Emergency Response")
     needs = context_data.get("needs_assessment", "")
+    donor_reqs = _donor_manifest_context(donor)
 
     prompt = f"""
     Create a structured Theory of Change (ToC) for a humanitarian project in {country} focusing on {theme}.
     Context: {needs}
     Donor Format: {donor}
+
+    DONOR REQUIREMENTS (from the call manifest — align causal logic to these):
+    {donor_reqs}
 
     Return ONLY a valid JSON object matching this schema:
     {{
@@ -153,9 +195,13 @@ def generate_logframe(toc_data: Dict[str, Any], context_data: Dict[str, Any], do
     """
     country = context_data.get("country", "Target Country")
     theme = context_data.get("theme", "Emergency WASH & Multi-sector")
+    donor_reqs = _donor_manifest_context(donor)
 
     prompt = f"""
     Generate a structured Logical Framework for {donor} guidelines in {country} for {theme}.
+
+    DONOR REQUIREMENTS (from the call manifest — indicators must satisfy these):
+    {donor_reqs}
     Return ONLY a JSON object matching this schema:
     {{
       "goal": "Impact / Overall Goal narrative",
@@ -323,6 +369,7 @@ def generate_narrative_sections(logframe_data: Dict[str, Any], context_data: Dic
     profile = get_donor_profile(donor)
     country = context_data.get("country", "Target Country")
     theme = context_data.get("theme", "Emergency Response")
+    donor_reqs = _donor_manifest_context(donor)  # call-aware: what THIS donor requires
 
     sections = {}
     for sec in profile["sections"]:
@@ -335,6 +382,9 @@ def generate_narrative_sections(logframe_data: Dict[str, Any], context_data: Dic
         Maximum Character Limit: {max_c} characters. Do NOT exceed this limit under any circumstance.
         Context: {context_data.get('needs_assessment', '')}
         Logframe Summary: {json.dumps(logframe_data.get('matrix', []))}
+
+        DONOR REQUIREMENTS (from the call manifest — write to satisfy these):
+        {donor_reqs}
 
         Write direct, high-impact donor text. Return ONLY the section narrative.
         """
