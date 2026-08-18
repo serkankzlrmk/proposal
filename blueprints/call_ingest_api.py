@@ -21,6 +21,7 @@ import logging
 import sqlite3
 import time
 import uuid
+from typing import Any, Dict
 
 from flask import Blueprint, jsonify, request
 
@@ -69,11 +70,65 @@ def _init_table() -> None:
                 summary       TEXT NOT NULL DEFAULT '',
                 requirements_json TEXT NOT NULL DEFAULT '[]',
                 deadline      TEXT NOT NULL DEFAULT '',
+                documents_json TEXT NOT NULL DEFAULT '[]',
+                brief         TEXT NOT NULL DEFAULT '',
                 created_at    REAL NOT NULL,
                 updated_at    REAL NOT NULL
             )
         """)
+        # Idempotent migration: add documents_json + brief if missing
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(call_drafts)").fetchall()]
+        if "documents_json" not in cols:
+            conn.execute("ALTER TABLE call_drafts ADD COLUMN documents_json TEXT NOT NULL DEFAULT '[]'")
+        if "brief" not in cols:
+            conn.execute("ALTER TABLE call_drafts ADD COLUMN brief TEXT NOT NULL DEFAULT ''")
     conn.close()
+
+
+def _generate_brief(corpus: str, extracted: Dict[str, Any], draft: Dict[str, Any]) -> str:
+    """Human-readable brief: what the call says & wants.
+
+    LLM-generated (with the extraction summary + manifest draft as context);
+    falls back to a deterministic structured brief when the LLM is unavailable.
+    """
+    try:
+        from engine.generator import _call_llm
+
+        reqs = "\n".join(f"- {r}" for r in (extracted.get("requirements") or [])[:12])
+        gates = ", ".join(draft.get("hard_eligibility_gates") or {}) or "none"
+        prompt = f"""
+        Write a concise, human-friendly BRIEF of this donor call for a proposal writer.
+        Structure it as:
+        ## What this call is about
+        (2-3 sentences: who is funding, what problem, where, how much, deadline)
+
+        ## What the donor wants
+        (bullet list: mandatory requirements, hard gates, budget rules, sections)
+
+        ## What you must do
+        (3-5 concrete next steps for the proposal writer)
+
+        Call summary: {extracted.get('summary', '')}
+        Requirements: {reqs}
+        Hard gates: {gates}
+        Deadline: {extracted.get('deadline', 'unknown')}
+        Budget cap: {draft.get('overhead_cap_percent', 'n/a')}% overhead | Currency: {draft.get('currency', 'USD')} | Max: {draft.get('budget_max', 'n/a')}
+        """
+        raw = _call_llm(prompt, temperature=0.2, action="call_brief")
+        if raw and raw.strip():
+            return raw.strip()[:6000]
+    except Exception as e:
+        logger.warning("Brief generation failed: %s", e)
+
+    # Deterministic fallback
+    reqs = "\n".join(f"- {r}" for r in (extracted.get("requirements") or [])[:10]) or "- (none extracted)"
+    return (
+        f"## What this call is about\n{extracted.get('summary', 'No summary available.')}\n\n"
+        f"## What the donor wants\n{reqs}\n"
+        f"- Deadline: {extracted.get('deadline', 'unknown')}\n"
+        f"- Overhead cap: {draft.get('overhead_cap_percent', 'n/a')}% | Currency: {draft.get('currency', 'USD')} | Budget max: {draft.get('budget_max', 'n/a')}\n\n"
+        f"## What you must do\n- Review the extracted requirements above and publish the manifest to start writing."
+    )
 
 
 @call_ingest_bp.route("/ingest", methods=["POST"])
@@ -100,6 +155,7 @@ def ingest_call():
     # Concatenate all documents into one corpus
     corpus_parts = []
     accepted = 0
+    documents = []
     for f in files:
         filename = (f.filename or "")
         if not filename:
@@ -108,6 +164,7 @@ def ingest_call():
         text = extract_document_text(data, filename)
         if text.strip():
             corpus_parts.append(f"===== {filename} =====\n{text}")
+            documents.append({"filename": filename, "chars": len(text)})
             accepted += 1
         else:
             logger.warning("No extractable text from %s (unsupported or empty)", filename)
@@ -120,19 +177,24 @@ def ingest_call():
     extracted = extract_requirements(corpus)
     draft = build_manifest_draft(call_id, display_name, extracted)
 
+    # ── Human-readable brief: what the call says & wants (LLM, fallback) ────
+    brief = _generate_brief(corpus, extracted, draft)
+
     draft_id = f"draft_{uuid.uuid4().hex[:10]}"
     conn = _conn()
     try:
         with conn:
             conn.execute(
-                "INSERT INTO call_drafts (id, call_id, display_name, status, manifest_json, summary, requirements_json, deadline, created_at, updated_at) "
-                "VALUES (?, ?, ?, 'review', ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO call_drafts (id, call_id, display_name, status, manifest_json, summary, requirements_json, deadline, documents_json, brief, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'review', ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     draft_id, call_id, display_name,
                     json.dumps(draft, ensure_ascii=False),
                     extracted.get("summary", ""),
                     json.dumps(extracted.get("requirements") or [], ensure_ascii=False),
                     str(extracted.get("deadline", "")),
+                    json.dumps(documents, ensure_ascii=False),
+                    brief,
                     time.time(), time.time(),
                 ),
             )
@@ -144,6 +206,8 @@ def ingest_call():
         "draft_id": draft_id,
         "call_id": call_id,
         "documents_accepted": accepted,
+        "documents": documents,
+        "brief": brief,
         "summary": extracted.get("summary", ""),
         "requirements": extracted.get("requirements") or [],
         "deadline": extracted.get("deadline", ""),
@@ -168,17 +232,25 @@ def list_published():
 
 @call_ingest_bp.route("/drafts", methods=["GET"])
 def list_drafts():
-    """List all call ingestion drafts."""
+    """List all call ingestion drafts (with documents + brief)."""
     _init_table()
     conn = _conn()
     try:
         rows = conn.execute(
-            "SELECT id, call_id, display_name, status, summary, deadline, created_at, updated_at "
+            "SELECT id, call_id, display_name, status, summary, deadline, documents_json, brief, created_at, updated_at "
             "FROM call_drafts ORDER BY updated_at DESC"
         ).fetchall()
     finally:
         conn.close()
-    return jsonify({"drafts": [dict(r) for r in rows]})
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["documents"] = json.loads(d.pop("documents_json") or "[]")
+        except Exception:
+            d["documents"] = []
+        out.append(d)
+    return jsonify({"drafts": out})
 
 
 @call_ingest_bp.route("/drafts/<draft_id>", methods=["GET"])

@@ -30,7 +30,6 @@
       3: document.getElementById('stepContainer3'),
       4: document.getElementById('stepContainer4'),
       5: document.getElementById('stepContainer5'),
-      6: document.getElementById('stepContainer6'),
     },
     // Step 1 Inputs
     inputTitle: document.getElementById('inputTitle'),
@@ -163,7 +162,6 @@
       switchStep4Subtab(state.step4Subtab || 'narrative');
     }
     if (state.currentStep === 5) renderVerifier();
-    if (state.currentStep === 6) loadCallDrafts();
 
     triggerAutosave();
   }
@@ -677,10 +675,22 @@
     }
   }
 
+  // ── Donor Call section (separate, after the wizard) ─────────────────────
+  function showDonorCallSection() {
+    document.getElementById('landingView').style.display = 'none';
+    document.getElementById('workspace').style.display = 'none';
+    document.getElementById('donorCallSection').style.display = 'block';
+    loadCallDrafts();
+  }
+
   function renderCallIngestResult(body) {
     const m = body.manifest_draft || {};
     const gates = Object.entries(m.hard_eligibility_gates || {})
       .map(([k, v]) => `<span class="gate-badge pass">${esc(k)}</span>`).join(' ') || '<span class="gate-badge unverified">none</span>';
+    const docs = (body.documents || []).map(d =>
+      `<span class="gate-badge unverified">📄 ${esc(d.filename)} (${d.chars.toLocaleString()} chars)</span>`
+    ).join(' ') || '';
+    const brief = body.brief || '';
     el.callIngestResult.style.display = 'block';
     el.callIngestResult.innerHTML = `
       <div class="glass-card">
@@ -694,6 +704,8 @@
             <button class="btn btn-sm" id="btnRejectDraft">Reject</button>
           </div>
         </div>
+        ${docs ? `<div style="font-size: 12px; margin-bottom: 8px;"><strong>Uploaded documents:</strong> ${docs}</div>` : ''}
+        ${brief ? `<div style="font-size: 12.5px; line-height: 1.7; background: rgba(2,132,199,0.06); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; white-space: pre-wrap;">${esc(brief)}</div>` : ''}
         <div style="font-size: 12px; line-height: 1.9;">
           <div><strong>Deadline:</strong> ${esc(body.deadline || 'unknown')} &nbsp;|&nbsp; <strong>Currency:</strong> ${esc(m.currency || 'USD')} &nbsp;|&nbsp; <strong>Budget max:</strong> ${m.budget_max ? m.budget_max.toLocaleString() : '—'} &nbsp;|&nbsp; <strong>Duration:</strong> ${m.max_duration_months || '—'} mo</div>
           <div><strong>Hard gates:</strong> ${gates}</div>
@@ -729,20 +741,23 @@
         el.callDraftsList.innerHTML = '<div style="color:var(--text-secondary); font-size:12.5px;">No calls ingested yet.</div>';
         return;
       }
-      el.callDraftsList.innerHTML = drafts.map(d => `
+      el.callDraftsList.innerHTML = drafts.map(d => {
+        const docs = (d.documents || []).map(x => esc(x.filename)).join(', ');
+        return `
         <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); font-size:12.5px;">
           <div>
             <strong>${esc(d.display_name)}</strong>
             <span class="gate-badge ${d.status === 'published' ? 'pass' : (d.status === 'rejected' ? 'hard-fail' : 'unverified')}">${esc(d.status.toUpperCase())}</span>
-            <div style="color:var(--text-secondary); font-size:11px;">${esc(d.call_id)} • deadline ${esc(d.deadline || '—')}</div>
+            <div style="color:var(--text-secondary); font-size:11px;">${esc(d.call_id)} • deadline ${esc(d.deadline || '—')}${docs ? ` • 📄 ${docs}` : ''}</div>
+            ${d.brief ? `<div style="color:var(--text-secondary); font-size:11px; margin-top:2px; max-width:560px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(d.brief.split('\n')[0])}</div>` : ''}
           </div>
           ${d.status === 'review' ? `
             <div style="display:flex; gap:6px;">
               <button class="btn btn-sm btn-primary" data-pub="${d.id}">Publish</button>
               <button class="btn btn-sm" data-rej="${d.id}">Reject</button>
             </div>` : ''}
-        </div>
-      `).join('');
+        </div>`;
+      }).join('');
       el.callDraftsList.querySelectorAll('[data-pub]').forEach(b => b.addEventListener('click', () => publishDraft(b.dataset.pub)));
       el.callDraftsList.querySelectorAll('[data-rej]').forEach(b => b.addEventListener('click', () => rejectDraft(b.dataset.rej)));
     } catch (e) {
@@ -1324,7 +1339,7 @@
         document.getElementById('newProposalModal').style.display = 'none';
         renderCallIngestResult(body);
         loadCallDrafts();
-        setStep(6);
+        showDonorCallSection();
       } catch (e) {
         alert(`Ingest failed: ${e.message}`);
       }

@@ -70,9 +70,6 @@
         <button class="step-btn" data-step="5">
           <span class="step-num">5</span> Verifier Audit & PDF
         </button>
-        <button class="step-btn" data-step="6">
-          <span class="step-num">6</span> Donor Call
-        </button>
       </nav>
 
       <!-- Step Content Area -->
@@ -281,47 +278,49 @@
           </div>
         </div>
 
-        <!-- ── Step 6: Donor Call Ingestion ─────────────────────────────── -->
-        <div id="stepContainer6" class="step-view" style="display: none;">
-          <div class="step-header-area">
-            <div>
-              <h2 class="step-title">Donor Call Ingestion</h2>
-              <p class="step-subtitle">Upload a donor call PDF — the system extracts requirements, you review & approve, the engine scores against it.</p>
-            </div>
-          </div>
-
-          <div class="glass-card">
-            <div class="form-group">
-              <label class="form-label" for="callFileInput">Donor Call Documents (PDF, DOCX, MD — multiple allowed)</label>
-              <input type="file" id="callFileInput" class="input-text" accept=".pdf,.docx,.md,.markdown,.txt" multiple style="padding: 8px;">
-            </div>
-            <div class="form-grid">
-              <div class="form-group">
-                <label class="form-label" for="callIdInput">Call ID (donor_id)</label>
-                <input type="text" id="callIdInput" class="input-text" placeholder="e.g. unfpa_turkiye_cefm">
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="callNameInput">Display Name</label>
-                <input type="text" id="callNameInput" class="input-text" placeholder="e.g. UNFPA Türkiye CEFM Grant Call">
-              </div>
-            </div>
-            <button id="btnIngestCall" class="btn btn-primary" style="margin-top: 8px;">Ingest Call & Extract Requirements</button>
-          </div>
-
-          <!-- Extraction result (summary + requirements + manifest draft) -->
-          <div id="callIngestResult" style="display: none; margin-top: 16px;"></div>
-
-          <!-- Draft list -->
-          <div class="glass-card" style="margin-top: 16px;">
-            <h3 style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px;">Ingested Call Drafts</h3>
-            <div id="callDraftsList"><!-- Rendered dynamically --></div>
-          </div>
-        </div>
-
       </div>
     </section>
 
   </main>
+
+  <!-- Donor Call Section (separate, after the wizard — not a wizard step) -->
+  <section class="main-layout" id="donorCallSection" style="display:none;">
+    <div class="workspace-pane" style="max-width: 900px; margin: 0 auto; width: 100%;">
+      <div class="step-header-area" style="margin-bottom: 16px;">
+        <div>
+          <h2 class="step-title">Donor Call</h2>
+          <p class="step-subtitle">Upload the donor call documents — the system extracts what the call says & wants, you review & approve.</p>
+        </div>
+      </div>
+
+      <div class="glass-card">
+        <div class="form-group">
+          <label class="form-label" for="callFileInput">Donor Call Documents (PDF, DOCX, MD — multiple allowed)</label>
+          <input type="file" id="callFileInput" class="input-text" accept=".pdf,.docx,.md,.markdown,.txt" multiple style="padding: 8px;">
+        </div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label" for="callIdInput">Call ID (donor_id)</label>
+            <input type="text" id="callIdInput" class="input-text" placeholder="e.g. unfpa_turkiye_cefm">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="callNameInput">Display Name</label>
+            <input type="text" id="callNameInput" class="input-text" placeholder="e.g. UNFPA Türkiye CEFM Grant Call">
+          </div>
+        </div>
+        <button id="btnIngestCall" class="btn btn-primary" style="margin-top: 8px;">Ingest Call & Extract Requirements</button>
+      </div>
+
+      <!-- Extraction result (brief + documents + requirements + manifest draft) -->
+      <div id="callIngestResult" style="display: none; margin-top: 16px;"></div>
+
+      <!-- Draft list -->
+      <div class="glass-card" style="margin-top: 16px;">
+        <h3 style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px;">Ingested Call Drafts</h3>
+        <div id="callDraftsList"><!-- Rendered dynamically --></div>
+      </div>
+    </div>
+  </section>
 
   <!-- Floating AI Advisor Chat (bottom-right, pop-up on click) -->
   <div id="advisorFab" class="advisor-fab" title="AI Advisor">
