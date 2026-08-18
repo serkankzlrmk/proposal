@@ -556,3 +556,151 @@ Call ingestion da **tamamen trace'lenir** (Waku deseni):
 Her sistem tasarımında bu dört sütun olmalıdır — proposal da istisna değil.
 Call ingestion bunu uçtan uca örnekler: sistem sadece "üretmez", **öğrenir,
 hatırlar, kendini denetler**.
+
+---
+
+## 14. Pre-Flight Intake — Proposal Başlamadan Önce
+
+> **Kullanıcı deneyimi ilkesi:** proposal sihirbazı boş bir formla başlamaz.
+> Önce bir **ön giriş (intake) anketi** doldurulur, **call dosyası yüklenir**,
+> agent kuralları çıkarır ve **ülke/tema hakkında ön bilgi toplar** — sistem
+> ancak bu temel üzerine inşa edilir.
+
+### 14.1 Neden (WHY)
+
+Boş bir "New Proposal" formu kullanıcıyı boşlukta bırakır: hangi donör,
+hangi ülke, hangi tema, hangi format — hiçbiri bilinmezken Context & Targeting
+adımına atlamak erken ve isabetsiz olur. Doğru sıralama:
+
+1. **Kullanıcı niyetini söyler** (ülke, tema, proje tipi)
+2. **Call dosyası yüklenir** (zorunlu) — kuralların kaynağı
+3. **Agent kuralları çıkarır + ülke hakkında ön araştırma yapar**
+4. **Kullanıcı onaylar** (kurallar + toplanan bilgi)
+5. **Sistem ancak şimdi proposal'ı inşa eder** — her adım bilgiye dayanır
+
+### 14.2 Akış
+
+```mermaid
+flowchart TD
+    A[+ New Proposal tıklanır] --> B[STEP 0 — Pre-Flight Intake]
+    B --> C[IntakeForm doldurulur: ülke, tema, proje tipi, hedef kitle]
+    C --> D[Call yükle - ZORUNLU: PDF/DOCX/URL/paste]
+    D --> E[Agent call analizi: kurallar çıkarılır]
+    E --> F[Agent ön bilgi toplar - data_sources]
+    F --> G[Kullanıcı onayı: kurallar + özet]
+    G --> H[Proposal oluşturulur - intake ve call bağlanır]
+    H --> I[STEP 1+ — mevcut sihirbaz, kurallarla dolu]
+```
+
+### 14.3 IntakeForm — Ön Giriş Alanları
+
+```python
+class IntakeForm(BaseModel):
+    """Kullanıcının proposal başlatmadan önce doldurduğu anket."""
+    # Zorunlu (call ile birlikte):
+    country: str                    # "Sudan (Darfur)"
+    theme: str                      # "WASH", "Protection", "Health", ...
+    project_type: str               # emergency | early_recovery | resilience
+    target_group: str               # IDPs | refugees | host_community | mixed
+
+    # İsteğe bağlı (agent'ın işini kolaylaştırır):
+    organization: str = ""          # kuruluş adı (varsa önceden doldurulur)
+    budget_range_min: float | None  # USD
+    budget_range_max: float | None  # USD
+    duration_months: int | None     # 12, 18, 24...
+    partners: list[str] = []        # varsa konsorsiyum üyeleri
+    notes: str = ""                 # serbest not
+```
+
+**Kural:** `country` + `theme` + `project_type` zorunludur; call dosyası
+yüklenmeden proposal **oluşturulamaz** (demo modu hariç — testler için
+`ALLOW_CALL_FREE_DEMO=true` env bayrağı).
+
+### 14.4 Ön Bilgi Toplama (Pre-Flight Research)
+
+Kullanıcı `country` girdiği anda (call yüklenmeden bile) agent arka planda
+**data_sources** üzerinden bilgi toplamaya başlar:
+
+| Kaynak | Ne toplar | Intake'e ne katar |
+|---|---|---|
+| ReliefWeb | Ülkedeki son kriz raporları, acil durum çağrıları | `context_data.humanitarian_situation` ön taslağı |
+| GDACS | Aktif afet uyarıları (deprem, sel, siklon) | Context banner'ı: "Aktif GDACS uyarısı: ..." |
+| HDX | Refüje/IDP sayıları, nüfus verisi | `context_data.beneficiaries` ön sayıları |
+| FTS | Ülkeye akan insani fonlar, finansman boşluğu | Budget bağlamı |
+| WorldBank | Ülke maliyet göstergeleri | Budget kıyası |
+
+Toplanan bilgi **taslak olarak** `intake.research_summary` alanına yazılır ve
+kullanıcıya gösterilir: *"Sudan için 3 aktif GDACS uyarısı, 12 yeni ReliefWeb
+raporu, tahmini 6.8M IDP — devam edelim mi?"* Kullanıcı düzeltir/onaylar →
+`context_data`'nın başlangıcı olur.
+
+### 14.5 Zorunlu Call Yükleme — Neden
+
+- Kurallar (bölümler, karakter limitleri, kotalar) **call'dan çıkarılır** —
+  statik profillere güvenmek yanlış yönlendirir (her call farklı)
+- Verifier'ın denetleyeceği kural seti **proposal'ın kendi call'ından** gelir
+- "Bu proposal hangi çağrıya gidiyor?" sorusunun cevabı her zaman vardır
+- Kullanıcı dosyası yoksa sistem **reddeder ve nedenini söyler**:
+  *"Call for Proposals dokümanı olmadan proposal oluşturulamaz — kuralların
+  kaynağı eksik. Lütfen çağrı dokümanını yükleyin veya kütüphaneden seçin."*
+
+### 14.6 Frontend — Intake Ekranı
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  + New Proposal — Step 0: Pre-Flight Intake                  │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │  PROJE HAKKINDA (zorunlu)                              │  │
+│  │  Ülke / Bölge      [Sudan (Darfur)          ]           │  │
+│  │  Tema / Sektör     [WASH                    ]           │  │
+│  │  Proje Tipi        [( ) Emergency ( ) Early Recovery]   │  │
+│  │  Hedef Kitle       [( ) IDPs  ( ) Refugees  ( ) Mixed ] │  │
+│  │                                                         │  │
+│  │  CALL FOR PROPOSALS (zorunlu)                           │  │
+│  │  [📄 PDF/DOCX Yükle]  [URL]  [Yapıştır]  [Kütüphane]   │  │
+│  │  ─────────────────────────────────────────              │  │
+│  │  ✓ UN OCHA CBPF — Sudan 2026 Round                      │  │
+│  │    Deadline: 15 Oct 2026 · 8 bölüm · 4,000 char/tek    │  │
+│  │    Kota: %50 IDP · PSEA zorunlu                         │  │
+│  │  ┌────────────────────────────────────────────────┐    │  │
+│  │  │ AGENT ÖN ARAŞTIRMA (canlı gösterim)            │    │  │
+│  │  │ ✓ 3 aktif GDACS uyarısı                        │    │  │
+│  │  │ ✓ 12 yeni ReliefWeb raporu (son 30 gün)        │    │  │
+│  │  │ ✓ ~6.8M IDP (HDX) · fon: $214M (FTS)           │    │  │
+│  │  └────────────────────────────────────────────────┘    │  │
+│  │  [Kuralları incele]  [Onayla ve proposal'ı oluştur]    │  │
+│  └────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+"Kuralları incele" → Bölüm 13.7'deki panel: her kuralın kaynağı, confidence,
+belirsiz alanlar. Onay → proposal oluşturulur (`call_id` + `intake_data`
+bağlanır) → mevcut 5 adımlı sihirbaz **önceden doldurulmuş** başlar.
+
+### 14.7 DB — Intake Kalıcılığı
+
+`proposals` tablosuna eklenir:
+- `call_id TEXT` (FK → `calls.id`) — zorunlu (demo hariç)
+- `intake_data TEXT` — IntakeForm JSON + `research_summary` (agent ön
+  araştırma çıktısı)
+
+Mevcut `context_data` ile ilişki: intake onaylanınca `research_summary` →
+`context_data.humanitarian_situation` / `beneficiaries` alanlarına **taslak
+olarak** kopyalanır; kullanıcı Step 1'de düzenler.
+
+### 14.8 Ops
+
+- `intake_submitted`, `research_started`, `research_done`, `call_required_blocked`
+- Call yüklenmeden oluşturma denemesi → reddedilme de trace'e yazılır
+  (sistemin neden reddettiği denetlenebilir)
+- Ön araştırma veri kaynağı çağrıları `data_source_calls` tablosuna düşer
+
+### 14.9 API
+
+| Metot | Path | Açıklama |
+|---|---|---|
+| POST | /api/intake/submit | IntakeForm gönder (call_id ile) |
+| GET | /api/intake/research?country= | Ön araştırmayı tetikle + döndür |
+| GET | /api/calls | Call kütüphanesi listesi |
+| POST | /api/calls/upload | PDF/DOCX/URL yükle + analiz başlat |
+| POST | /api/calls/:id/approve | Kural setini onayla (proposal'a bağla) |
