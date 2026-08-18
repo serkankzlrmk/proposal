@@ -1313,6 +1313,15 @@
 
     // Advisor
     el.btnSendAdvisor.addEventListener('click', sendAdvisorMessage);
+    document.getElementById('advisorFab').addEventListener('click', () => {
+      const popup = document.getElementById('advisorPopup');
+      const open = popup.style.display !== 'none';
+      popup.style.display = open ? 'none' : 'flex';
+      if (!open) el.advisorInput.focus();
+    });
+    document.getElementById('btnCloseAdvisor').addEventListener('click', () => {
+      document.getElementById('advisorPopup').style.display = 'none';
+    });
     el.advisorInput.addEventListener('keydown', e => {
       if (e.key === 'Enter') sendAdvisorMessage();
     });
