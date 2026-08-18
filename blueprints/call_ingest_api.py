@@ -266,6 +266,10 @@ def get_draft(draft_id: str):
     d = dict(row)
     d["manifest"] = json.loads(d.pop("manifest_json") or "{}")
     d["requirements"] = json.loads(d.pop("requirements_json") or "[]")
+    try:
+        d["documents"] = json.loads(d.pop("documents_json") or "[]")
+    except Exception:
+        d["documents"] = []
     return jsonify({"draft": d})
 
 

@@ -733,6 +733,48 @@
     } catch (e) { alert(`Reject failed: ${e.message}`); }
   }
 
+  // ── View full call brief (modal) ────────────────────────────────────────
+  async function viewCallBrief(draftId) {
+    try {
+      const res = await api(`/api/calls/drafts/${draftId}`);
+      const d = res.draft || {};
+      const manifest = d.manifest || {};
+      const docs = (d.documents || []).map(x => `📄 ${esc(x.filename)} (${x.chars?.toLocaleString() || '?'} chars)`).join('\n') || '—';
+      const gates = Object.entries(manifest.hard_eligibility_gates || {})
+        .map(([k, v]) => `• ${k}`).join('\n') || '• none';
+      const briefHtml = (d.brief || 'No brief available.').split('\n').map(l =>
+        l.startsWith('## ') ? `<h4 style="margin:12px 0 6px; font-size:13px; color:var(--text);">${esc(l.slice(3))}</h4>`
+        : l.startsWith('- ') ? `<div style="font-size:12.5px; color:var(--text-secondary); padding-left:12px;">• ${esc(l.slice(2))}</div>`
+        : (l.trim() ? `<div style="font-size:12.5px; color:var(--text-secondary); margin:3px 0;">${esc(l)}</div>` : '')
+      ).join('');
+
+      // Reuse the modal pattern: build a lightweight overlay in-place
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.id = 'briefModal';
+      overlay.innerHTML = `
+        <div class="modal-card" style="width:640px; max-width:94vw;">
+          <div class="step-header-area" style="margin-bottom:12px;">
+            <div>
+              <h2 class="step-title" style="font-size:15px;">Call Brief — ${esc(d.display_name || d.call_id || '')}</h2>
+              <p class="step-subtitle" style="font-size:11.5px;">${esc(d.call_id || '')} • deadline ${esc(d.deadline || '—')} • status ${esc((d.status || '').toUpperCase())}</p>
+            </div>
+            <button class="btn btn-sm" id="btnCloseBrief">✕</button>
+          </div>
+          <div style="font-size:11.5px; color:var(--text-secondary); margin-bottom:10px; white-space:pre-line;"><strong>Documents:</strong>\n${docs}</div>
+          <div style="font-size:11.5px; color:var(--text-secondary); margin-bottom:10px; white-space:pre-line;"><strong>Hard gates:</strong>\n${gates}</div>
+          <div style="border-top:1px solid var(--border); padding-top:10px; max-height:46vh; overflow-y:auto;">
+            ${briefHtml}
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+      document.getElementById('btnCloseBrief').addEventListener('click', () => overlay.remove());
+    } catch (e) {
+      alert(`Failed to load brief: ${e.message}`);
+    }
+  }
+
   async function loadCallDrafts() {
     try {
       const res = await api('/api/calls/drafts');
@@ -756,10 +798,14 @@
               <button class="btn btn-sm btn-primary" data-pub="${d.id}">Publish</button>
               <button class="btn btn-sm" data-rej="${d.id}">Reject</button>
             </div>` : ''}
+          <div style="display:flex; gap:6px;">
+            <button class="btn btn-sm" data-brief="${d.id}" title="View the full call brief">📋 Brief</button>
+          </div>
         </div>`;
       }).join('');
       el.callDraftsList.querySelectorAll('[data-pub]').forEach(b => b.addEventListener('click', () => publishDraft(b.dataset.pub)));
       el.callDraftsList.querySelectorAll('[data-rej]').forEach(b => b.addEventListener('click', () => rejectDraft(b.dataset.rej)));
+      el.callDraftsList.querySelectorAll('[data-brief]').forEach(b => b.addEventListener('click', () => viewCallBrief(b.dataset.brief)));
     } catch (e) {
       el.callDraftsList.innerHTML = `<div style="color:var(--red); font-size:12.5px;">Failed to load drafts: ${esc(e.message)}</div>`;
     }
