@@ -145,44 +145,40 @@ def generate_toc(context_data: Dict[str, Any], donor: str = "OCHA_CBPF") -> Dict
 
 
 def generate_logframe(toc_data: Dict[str, Any], context_data: Dict[str, Any], donor: str = "OCHA_CBPF") -> Dict[str, Any]:
-    """Generate 4x4 Logical Framework matrix matching donor standards."""
+    """Generate structured LogicalFramework (goal/outcomes/outputs/indicators).
+
+    Canonical shape (ARCHITECTURAL_DECISIONS #3 / Master Spec §2.1). A legacy
+    flat `matrix` projection is included for UI/PDF backward compatibility
+    (matrix[].indicators strings feed the existing SMART regex path).
+    """
     country = context_data.get("country", "Target Country")
     theme = context_data.get("theme", "Emergency WASH & Multi-sector")
 
     prompt = f"""
-    Generate a complete 4x4 Logframe Matrix for {donor} guidelines in {country} for {theme}.
-    Return ONLY a JSON object with this schema:
+    Generate a structured Logical Framework for {donor} guidelines in {country} for {theme}.
+    Return ONLY a JSON object matching this schema:
     {{
-      "matrix": [
-        {{
-          "level": "Impact / Overall Goal",
-          "logic": "...",
-          "indicators": "...",
-          "mov": "...",
-          "assumptions": "..."
-        }},
-        {{
-          "level": "Outcome 1 (Specific Objective)",
-          "logic": "...",
-          "indicators": "...",
-          "mov": "...",
-          "assumptions": "..."
-        }},
-        {{
-          "level": "Output 1.1",
-          "logic": "...",
-          "indicators": "...",
-          "mov": "...",
-          "assumptions": "..."
-        }},
-        {{
-          "level": "Activities",
-          "logic": "...",
-          "indicators": "...",
-          "mov": "...",
-          "assumptions": "..."
-        }}
-      ]
+      "goal": "Impact / Overall Goal narrative",
+      "goal_indicators": [
+        {{"indicator_id": "g1", "narrative": "...", "target_value": 0.5, "unit": "CMR /10k/day",
+          "baseline": 0.0, "timeframe": "by end of project", "means_of_verification": "...",
+          "assumptions": "...", "disaggregated_by": ["gender", "age", "disability"]}}
+      ],
+      "outcomes": [
+        {{"outcome_id": "oc1", "narrative": "...",
+          "indicators": [{{"indicator_id": "oc1_i1", "narrative": "...", "target_value": 85.0,
+            "unit": "percent", "baseline": 0.0, "timeframe": "by month 12", "means_of_verification": "...",
+            "assumptions": "...", "disaggregated_by": ["gender", "age", "disability"]}}],
+          "outputs": [
+            {{"output_id": "op1", "narrative": "...",
+              "indicators": [{{"indicator_id": "op1_i1", "narrative": "...", "target_value": 12.0,
+                "unit": "facilities", "baseline": 0.0, "timeframe": "by month 9", "means_of_verification": "...",
+                "assumptions": "...", "disaggregated_by": ["gender", "age", "disability"]}}],
+              "activities": ["Act 1.1.1 ...", "Act 1.1.2 ..."]}}
+          ]}}
+      ],
+      "theory_of_change_narrative": "causal pathway narrative",
+      "assumptions": ["assumption 1", "assumption 2", "assumption 3"]
     }}
     """
     raw = _call_llm(prompt)
@@ -191,43 +187,135 @@ def generate_logframe(toc_data: Dict[str, Any], context_data: Dict[str, Any], do
             clean = raw.strip()
             if clean.startswith("```"):
                 clean = clean.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-            return json.loads(clean)
+            structured = json.loads(clean)
+            return project_logframe_to_matrix(structured)
         except Exception as e:
             logger.debug("Failed to parse LLM Logframe JSON: %s", e)
 
-    # Standard humanitarian 4x4 matrix
-    return {
-        "matrix": [
+    # Deterministic structured fallback (high-grade humanitarian matrix)
+    structured = {
+        "goal": f"Reduced excess morbidity, mortality, and vulnerability among conflict-affected IDPs and host communities in {country}.",
+        "goal_indicators": [
             {
-                "level": "Impact / Overall Goal",
-                "logic": f"Reduced excess morbidity, mortality, and vulnerability among conflict-affected IDPs and host communities in {country}.",
-                "indicators": "Crude Mortality Rate (CMR) < 0.5 / 10,000 / day; Global Acute Malnutrition (GAM) prevalence < 10% in catchment zone.",
-                "mov": "UN OCHA Cluster Surveys, Ministry of Health Epidemiological Bulletins, SMART Assessment Reports.",
+                "indicator_id": "g1",
+                "narrative": "Crude Mortality Rate (CMR) below 0.5 per 10,000 per day",
+                "target_value": 0.5,
+                "unit": "CMR /10,000/day",
+                "baseline": 0.0,
+                "timeframe": "by end of project",
+                "means_of_verification": "UN OCHA Cluster Surveys, Ministry of Health Epidemiological Bulletins, SMART Assessment Reports.",
                 "assumptions": "Political stability permits ongoing humanitarian agency operations without prolonged blockades.",
-            },
+                "disaggregated_by": ["gender", "age", "disability"],
+            }
+        ],
+        "outcomes": [
             {
-                "level": "Outcome 1 (Specific Objective)",
-                "logic": f"Vulnerable displaced and host households maintain uninterrupted access to dignified, safe {theme} services.",
-                "indicators": ">= 85% of target population accessing standard emergency allocations per Sphere guidelines; >= 90% user satisfaction.",
-                "mov": "Periodic Post-Distribution Monitoring (PDM) reports, community feedback logs, Third-Party Monitoring (TPM) audits.",
-                "assumptions": "Catchment security allows beneficiaries safe daytime access to service facilities.",
-            },
-            {
-                "level": "Output 1.1",
-                "logic": f"Essential community infrastructure rehabilitated, solarized, and handed over to gender-balanced local committees.",
-                "indicators": "12 critical facilities fully operationalized; 24 local committee members (50% female) trained in maintenance.",
-                "mov": "Engineering handover certificates, training attendance rosters with SADD disaggregation, water quality test certificates.",
-                "assumptions": "Equipment clearance and technical hardware supply lines remain uninterrupted.",
-            },
-            {
-                "level": "Activities",
-                "logic": f"Act 1.1.1: Rapid technical assessment and site baseline survey.\nAct 1.1.2: Competitive procurement and solar installation.\nAct 1.1.3: Community hygiene and protection promotion campaigns.",
-                "indicators": "Milestone delivery >= 95% against workplan timeline; 100% of procured items verified against Sphere specifications.",
-                "mov": "Weekly contractor field progress logs, photographic verification geo-tagged dossiers, monthly financial ledgers.",
-                "assumptions": "Community leadership buy-in and peaceful coexistence between displaced and host populations.",
-            },
-        ]
+                "outcome_id": "oc1",
+                "narrative": f"Vulnerable displaced and host households maintain uninterrupted access to dignified, safe {theme} services.",
+                "indicators": [
+                    {
+                        "indicator_id": "oc1_i1",
+                        "narrative": "At least 85% of target population accessing standard emergency allocations per Sphere guidelines",
+                        "target_value": 85.0,
+                        "unit": "percent",
+                        "baseline": 0.0,
+                        "timeframe": "by month 12",
+                        "means_of_verification": "Periodic Post-Distribution Monitoring (PDM) reports, community feedback logs, Third-Party Monitoring (TPM) audits.",
+                        "assumptions": "Catchment security allows beneficiaries safe daytime access to service facilities.",
+                        "disaggregated_by": ["gender", "age", "disability"],
+                    }
+                ],
+                "outputs": [
+                    {
+                        "output_id": "op1",
+                        "narrative": "Essential community infrastructure rehabilitated, solarized, and handed over to gender-balanced local committees.",
+                        "indicators": [
+                            {
+                                "indicator_id": "op1_i1",
+                                "narrative": "12 critical facilities fully operationalized and 24 local committee members (50% female) trained in maintenance",
+                                "target_value": 12.0,
+                                "unit": "facilities",
+                                "baseline": 0.0,
+                                "timeframe": "by month 9",
+                                "means_of_verification": "Engineering handover certificates, training attendance rosters with SADD disaggregation, water quality test certificates.",
+                                "assumptions": "Equipment clearance and technical hardware supply lines remain uninterrupted.",
+                                "disaggregated_by": ["gender", "age", "disability"],
+                            }
+                        ],
+                        "activities": [
+                            "Act 1.1.1: Rapid technical assessment and site baseline survey.",
+                            "Act 1.1.2: Competitive procurement and solar installation.",
+                            "Act 1.1.3: Community hygiene and protection promotion campaigns.",
+                        ],
+                    }
+                ],
+            }
+        ],
+        "theory_of_change_narrative": (
+            "Immediate inputs (procurement, staffing) enable rapid field deployment; "
+            "rehabilitated infrastructure and trained committees deliver Sphere-standard services; "
+            "sustained dignified access for displaced and host households reduces excess mortality "
+            "and builds local resilience."
+        ),
+        "assumptions": [
+            "Humanitarian corridors remain open for continuous aid delivery.",
+            "Local authorities maintain operational MoUs and access permits.",
+            "Community elders and women-led committees support site operations.",
+        ],
     }
+    return project_logframe_to_matrix(structured)
+
+
+def project_logframe_to_matrix(structured: Dict[str, Any]) -> Dict[str, Any]:
+    """Project a structured LogicalFramework onto the legacy flat 4x4 matrix.
+
+    The returned dict carries BOTH the canonical structured fields AND a
+    `matrix` projection (level/logic/indicators/mov/assumptions rows) so the
+    existing wizard UI and Typst PDF pipeline keep working unchanged.
+    """
+    out = dict(structured or {})
+
+    goal = str(out.get("goal", ""))
+    goal_inds = out.get("goal_indicators", []) or []
+    outcomes = out.get("outcomes", []) or []
+
+    def _ind_text(ind) -> str:
+        if isinstance(ind, dict):
+            return str(ind.get("narrative", ""))
+        return str(ind)
+
+    rows = []
+    # Goal row
+    rows.append({
+        "level": "Impact / Overall Goal",
+        "logic": goal,
+        "indicators": "; ".join(_ind_text(i) for i in goal_inds),
+        "mov": "; ".join(str(i.get("means_of_verification", "")) for i in goal_inds if isinstance(i, dict)),
+        "assumptions": "; ".join(str(i.get("assumptions", "")) for i in goal_inds if isinstance(i, dict)),
+    })
+    # Outcome rows (1-3) + output rows (1-5 per outcome)
+    for oc in outcomes:
+        if not isinstance(oc, dict):
+            continue
+        rows.append({
+            "level": f"Outcome {oc.get('outcome_id', '1')} (Specific Objective)",
+            "logic": str(oc.get("narrative", "")),
+            "indicators": "; ".join(_ind_text(i) for i in oc.get("indicators", []) or []),
+            "mov": "; ".join(str(i.get("means_of_verification", "")) for i in oc.get("indicators", []) if isinstance(i, dict)),
+            "assumptions": "; ".join(str(i.get("assumptions", "")) for i in oc.get("indicators", []) if isinstance(i, dict)),
+        })
+        for op in oc.get("outputs", []) or []:
+            if not isinstance(op, dict):
+                continue
+            rows.append({
+                "level": f"Output {op.get('output_id', '1.1')}",
+                "logic": str(op.get("narrative", "")),
+                "indicators": "; ".join(_ind_text(i) for i in op.get("indicators", []) or []),
+                "mov": "; ".join(str(i.get("means_of_verification", "")) for i in op.get("indicators", []) if isinstance(i, dict)),
+                "assumptions": "; ".join(str(i.get("assumptions", "")) for i in op.get("indicators", []) if isinstance(i, dict)),
+            })
+    out["matrix"] = rows
+    return out
 
 
 def generate_narrative_sections(logframe_data: Dict[str, Any], context_data: Dict[str, Any], donor: str = "OCHA_CBPF") -> Dict[str, str]:

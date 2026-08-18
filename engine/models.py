@@ -1,13 +1,14 @@
 """
 proposal/engine/models.py — Canonical Pydantic Core Schemas (Master Spec §2.1).
 
-Rollout strategy: this module grows per phase. Current scope (Phase 2 alignment):
-  - DonorManifest   : root-level declarative donor manifest (ARCHITECTURAL_DECISIONS #1)
-  - ReferenceEntry  : citation registry entry (shared by advisor/registry layers)
+Rollout: Phase 2 alignment added DonorManifest + ReferenceEntry.
+Step 3 (this phase) adds the STRUCTURED logframe architecture
+(ARCHITECTURAL_DECISIONS #3): LogframeIndicator / LogframeOutput /
+LogframeOutcome / LogicalFramework / GanttItem. The free-text regex engine
+(engine/smart_parser.py) adapts unstructured strings into these fields.
 
-Later phases (Step 3/4) add: LogframeIndicator/LogframeOutcome/LogicalFramework,
-BudgetItem, RiskMatrixItem, ScoreTraceItem, EligibilityGateResult,
-ProposalEvaluationReport.
+Later phases (Step 4) add: BudgetItem, RiskMatrixItem, ScoreTraceItem,
+EligibilityGateResult, ProposalEvaluationReport.
 """
 
 from __future__ import annotations
@@ -82,3 +83,110 @@ class ReferenceEntry(BaseModel):
     year: int = 0
     url: Optional[str] = None
     verified: bool = False
+
+
+# ── Step 3: Structured Logframe Architecture (ARCHITECTURAL_DECISIONS #3) ──
+class LogframeIndicator(BaseModel):
+    """SMART indicator with structured target fields (Master Spec §2.1)."""
+
+    indicator_id: str = ""
+    narrative: str = ""
+    target_value: float = Field(default=0.0)
+    unit: str = Field(default="individuals")
+    baseline: float = Field(default=0.0)
+    timeframe: str = Field(default="by end of project")
+    means_of_verification: str = Field(default="")
+    assumptions: str = Field(default="")
+    disaggregated_by: List[str] = Field(default_factory=lambda: ["gender", "age", "disability"])
+
+    @property
+    def smart_blob(self) -> str:
+        """Compact string used by the deterministic SMART regex engine."""
+        parts = [self.narrative, self.timeframe, self.unit, self.means_of_verification]
+        return " ".join(str(p) for p in parts if p)
+
+
+class LogframeOutput(BaseModel):
+    output_id: str = ""
+    narrative: str = ""
+    indicators: List[LogframeIndicator] = Field(default_factory=list)
+    activities: List[str] = Field(default_factory=list)
+
+
+class LogframeOutcome(BaseModel):
+    outcome_id: str = ""
+    narrative: str = ""
+    indicators: List[LogframeIndicator] = Field(default_factory=list)
+    outputs: List[LogframeOutput] = Field(default_factory=list)
+
+
+class LogicalFramework(BaseModel):
+    """Structured 4x4 hierarchy: Goal -> Outcomes -> Outputs -> Activities."""
+
+    goal: str = ""
+    goal_indicators: List[LogframeIndicator] = Field(default_factory=list)
+    outcomes: List[LogframeOutcome] = Field(default_factory=list)
+    theory_of_change_narrative: str = ""
+    assumptions: List[str] = Field(default_factory=list)
+
+
+class GanttItem(BaseModel):
+    """Activity schedule row (Step 3 directive #4)."""
+
+    activity_id: str = ""
+    name: str = ""
+    output_id: str = ""
+    start_month: int = Field(default=1, ge=1, le=24)
+    end_month: int = Field(default=1, ge=1, le=24)
+    lead_role: str = ""
+
+
+def iter_indicator_entries(logframe: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Yield (level, indicators_text) pairs from any logframe shape.
+
+    Supports BOTH the structured LogicalFramework shape (goal/outcomes/
+    outputs, each with indicator objects) and the legacy flat matrix rows
+    ({"indicators": "..."}). The SMART regex engine consumes the returned
+    indicator text strings, so the structured model degrades gracefully
+    against the existing scoring path.
+    """
+    entries: List[Dict[str, str]] = []
+
+    matrix = logframe.get("matrix", []) if isinstance(logframe, dict) else []
+    if matrix:
+        for row in matrix:
+            if not isinstance(row, dict):
+                continue
+            text = str(row.get("indicators", ""))
+            if text.strip():
+                entries.append({"level": str(row.get("level", "matrix")), "indicators": text})
+        return entries
+
+    # Structured shape
+    goal = str(logframe.get("goal", ""))
+    if goal:
+        entries.append({"level": "goal", "indicators": goal})
+    for gi in logframe.get("goal_indicators", []) or []:
+        if isinstance(gi, dict) and str(gi.get("narrative", "")).strip():
+            entries.append({"level": "goal", "indicators": str(gi.get("narrative", ""))})
+
+    for oc in logframe.get("outcomes", []) or []:
+        if not isinstance(oc, dict):
+            continue
+        on = str(oc.get("narrative", ""))
+        if on:
+            entries.append({"level": f"outcome:{oc.get('outcome_id', '')}", "indicators": on})
+        for oi in oc.get("indicators", []) or []:
+            if isinstance(oi, dict) and str(oi.get("narrative", "")).strip():
+                entries.append({"level": f"outcome:{oc.get('outcome_id', '')}", "indicators": str(oi.get("narrative", ""))})
+        for op in oc.get("outputs", []) or []:
+            if not isinstance(op, dict):
+                continue
+            pn = str(op.get("narrative", ""))
+            if pn:
+                entries.append({"level": f"output:{op.get('output_id', '')}", "indicators": pn})
+            for pi in op.get("indicators", []) or []:
+                if isinstance(pi, dict) and str(pi.get("narrative", "")).strip():
+                    entries.append({"level": f"output:{op.get('output_id', '')}", "indicators": str(pi.get("narrative", ""))})
+
+    return entries

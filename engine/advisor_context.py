@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from engine.models import DonorManifest
+from engine.models import DonorManifest, iter_indicator_entries
 
 logger = logging.getLogger(__name__)
 
@@ -245,12 +245,11 @@ class AdvisorContextBuilder:
         trace = engine_result.get("trace", [])
 
         # SMART: scan indicators for missing format dimensions
+        # (structured LogicalFramework + legacy flat matrix both supported)
         logframe = proposal.get("logframe_data") or {}
-        matrix = logframe.get("matrix", []) if isinstance(logframe, dict) else []
-        for idx, row in enumerate(matrix):
-            if not isinstance(row, dict):
-                continue
-            text = str(row.get("indicators", ""))
+        entries = iter_indicator_entries(logframe)
+        for idx, entry in enumerate(entries):
+            text = entry["indicators"]
             failed = [dim for dim, pat in self._SMART_PATTERNS.items() if not pat.search(text)]
             if failed:
                 missing = [

@@ -21,8 +21,10 @@ def escape_typst(text: Any) -> str:
     s = str(text)
     # Replace backslash with space
     s = s.replace("\\", " ")
-    # Escape characters that trigger formatting or modes in Typst content blocks
-    for ch in ("#", "$", "[", "]", "*", "_", "`", "@"):
+    # Escape characters that trigger formatting or modes in Typst content blocks.
+    # Double-quote must be escaped so LLM text with quotes does not close the
+    # surrounding Typst string literal in the compiled template.
+    for ch in ("#", "$", "[", "]", "*", "_", "`", "@", '"'):
         s = s.replace(ch, f"\\{ch}")
     return s
 

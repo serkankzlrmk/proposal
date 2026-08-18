@@ -16,6 +16,7 @@ try:
         delete_proposal,
         save_review,
         get_reviews,
+        ProposalLockedError,
     )
     from engine.donor_rules import DONOR_PROFILES, get_donor_profile
     from engine.generator import generate_toc, generate_logframe, generate_narrative_sections
@@ -32,6 +33,7 @@ except ImportError:
         delete_proposal,
         save_review,
         get_reviews,
+        ProposalLockedError,
     )
     from proposal.engine.donor_rules import DONOR_PROFILES, get_donor_profile
     from proposal.engine.generator import generate_toc, generate_logframe, generate_narrative_sections
@@ -138,10 +140,17 @@ def get_proposal_detail(proposal_id: str):
 
 @proposal_api_bp.route("/<proposal_id>", methods=["PUT"])
 def autosave_proposal(proposal_id: str):
-    """Update fields of an active proposal."""
+    """Update fields of an active proposal.
+
+    FSM guard: writing to a locked step's content returns 409 Conflict
+    (Master Spec invariant #1). Identical-value writes pass silently.
+    """
     data = request.get_json(force=True, silent=True) or {}
     user_id = data.get("user_id", "default_user")
-    updated = update_proposal(proposal_id, data, user_id=user_id)
+    try:
+        updated = update_proposal(proposal_id, data, user_id=user_id)
+    except ProposalLockedError as e:
+        return jsonify({"error": str(e), "code": "STEP_LOCKED"}), 409
     if not updated:
         return jsonify({"error": "Proposal not found or update failed"}), 404
     return jsonify({"proposal": updated})

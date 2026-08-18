@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from engine.models import DEFAULT_WEIGHTS, DonorManifest
+from engine.models import DEFAULT_WEIGHTS, DonorManifest, iter_indicator_entries
 
 logger = logging.getLogger(__name__)
 
@@ -369,8 +369,9 @@ class DonorScoringEngine:
         def _smart_criteria():
             dims = manifest.required_dimensions
             logframe = proposal.get("logframe_data") or {}
-            matrix = logframe.get("matrix", []) if isinstance(logframe, dict) else []
-            indicators = [str(row.get("indicators", "")) for row in matrix if isinstance(row, dict)]
+            # Structured LogicalFramework + legacy flat matrix both supported
+            entries = iter_indicator_entries(logframe)
+            indicators = [e["indicators"] for e in entries]
 
             passed = 0
             for dim in dims:
@@ -385,9 +386,9 @@ class DonorScoringEngine:
                 "criterion": "smart_criteria",
                 "score": round(score, 1),
                 "max_score": weights["smart_criteria"],
-                "target_step": "step4",
+                "target_step": "step3",
                 "target_field": "logframe",
-                "details": f"{passed} of {len(dims)} SMART dimensions satisfied by indicator patterns.",
+                "details": f"{passed} of {len(dims)} SMART dimensions satisfied by {len(indicators)} indicator entries.",
             }
 
         # 4. donor_keywords (15)

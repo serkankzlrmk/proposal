@@ -95,8 +95,15 @@ def test_donor_rules_character_limits():
     assert issues[0]["current_length"] == 4500
 
 
-def test_blind_verifier():
-    """Verify Blind Verifier scorecard."""
+def test_blind_verifier(monkeypatch):
+    """Verify Blind Verifier scorecard (deterministic path — no live LLM)."""
+    # Force the deterministic rule path: character limits + donor quotas.
+    # The live LLM-as-a-Judge branch is network-dependent and flakes in full
+    # runs (verdict varies by model output); the deterministic path is the
+    # contract this test locks.
+    import engine.verifier as verifier_mod
+
+    monkeypatch.setattr(verifier_mod, "OPENROUTER_API_KEY", "")
     sample = {
         "id": "prop_test_audit",
         "title": "OCHA Water Assistance",

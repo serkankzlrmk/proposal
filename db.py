@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 _db_lock = threading.Lock()
 
 
+class ProposalLockedError(Exception):
+    """Raised when a caller attempts to modify a locked step's content."""
+
+
 def get_db_connection() -> sqlite3.Connection:
     """Return a thread-safe connection to proposal.db with WAL mode."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -50,6 +54,7 @@ def init_db() -> None:
                 budget_data   TEXT NOT NULL DEFAULT '{"items":[],"total":0}',
                 review_data   TEXT NOT NULL DEFAULT '{}',
                 references_data TEXT NOT NULL DEFAULT '[]',
+                locked_steps  TEXT NOT NULL DEFAULT '[]',
                 created_at    REAL NOT NULL,
                 updated_at    REAL NOT NULL
             );
@@ -68,13 +73,17 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_rev_prop ON proposal_reviews(proposal_id);
         """)
     conn.close()
-    # Idempotent migration for existing databases (references_data column)
+    # Idempotent migrations for existing databases
     conn = get_db_connection()
     cols = [r[1] for r in conn.execute("PRAGMA table_info(proposals)").fetchall()]
     if "references_data" not in cols:
         conn.execute("ALTER TABLE proposals ADD COLUMN references_data TEXT NOT NULL DEFAULT '[]'")
         conn.commit()
         logger.info("Migration: added references_data column")
+    if "locked_steps" not in cols:
+        conn.execute("ALTER TABLE proposals ADD COLUMN locked_steps TEXT NOT NULL DEFAULT '[]'")
+        conn.commit()
+        logger.info("Migration: added locked_steps column")
     conn.close()
     logger.info("Proposal SQLite DB initialized at %s", DB_PATH)
 
@@ -94,6 +103,11 @@ def _row_to_proposal_dict(row: sqlite3.Row) -> Dict[str, Any]:
         except Exception:
             d["references"] = []
         del d["references_data"]
+    if "locked_steps" in d and isinstance(d["locked_steps"], str):
+        try:
+            d["locked_steps"] = json.loads(d["locked_steps"])
+        except Exception:
+            d["locked_steps"] = []
     return d
 
 
@@ -193,7 +207,13 @@ def create_proposal(
 
 
 def update_proposal(proposal_id: str, fields: Dict[str, Any], user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """Update fields of an existing proposal with automatic timestamping."""
+    """Update fields of an existing proposal with automatic timestamping.
+
+    FSM guard (Master Spec invariant #1): locked steps are immutable. If the
+    incoming payload attempts to CHANGE the content of a locked step, a
+    ProposalLockedError is raised (API layer maps it to 409 Conflict).
+    Writes that keep the locked value byte-identical are allowed.
+    """
     init_db()
     allowed_cols = {
         "title",
@@ -209,6 +229,7 @@ def update_proposal(proposal_id: str, fields: Dict[str, Any], user_id: Optional[
         "budget_data",
         "review_data",
         "references",
+        "locked_steps",
     }
     updates = {}
     for k, v in fields.items():
@@ -217,8 +238,49 @@ def update_proposal(proposal_id: str, fields: Dict[str, Any], user_id: Optional[
                 updates[k] = json.dumps(v) if not isinstance(v, str) else v
             elif k == "references":
                 updates["references_data"] = json.dumps(v) if not isinstance(v, str) else v
+            elif k == "locked_steps":
+                updates["locked_steps"] = json.dumps(v) if not isinstance(v, str) else v
             else:
                 updates[k] = v
+
+    if not updates:
+        return get_proposal(proposal_id, user_id)
+
+    # ── FSM lock guard: step content is immutable once locked ─────────────
+    current = get_proposal(proposal_id, user_id)
+    if current:
+        locked = set(current.get("locked_steps") or [])
+        if locked:
+            step_to_cols = {
+                1: ["context_data"],
+                2: ["toc_data"],
+                3: ["logframe_data"],
+                4: ["narrative_data"],
+                5: ["budget_data", "review_data"],
+            }
+            for step_num, cols in step_to_cols.items():
+                if step_num not in locked:
+                    continue
+                for col in cols:
+                    if col not in updates:
+                        continue
+                    try:
+                        incoming = json.loads(updates[col]) if isinstance(updates[col], str) else updates[col]
+                    except Exception:
+                        continue
+                    existing = current.get(col)
+                    if isinstance(existing, str):
+                        try:
+                            existing = json.loads(existing)
+                        except Exception:
+                            pass
+                    if incoming != existing:
+                        raise ProposalLockedError(
+                            f"Step {step_num} is locked; content is immutable. "
+                            f"Rejecting write to '{col}'."
+                        )
+                    # Identical value -> drop from updates (no-op write)
+                    updates.pop(col, None)
 
     if not updates:
         return get_proposal(proposal_id, user_id)
@@ -239,6 +301,23 @@ def update_proposal(proposal_id: str, fields: Dict[str, Any], user_id: Optional[
         return get_proposal(proposal_id, user_id)
     finally:
         conn.close()
+
+
+def lock_step(proposal_id: str, step_num: int, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Lock a step (draft -> analyzed -> locked). Frozen snapshot contract.
+
+    Returns the updated proposal, or None if the proposal is not found.
+    """
+    init_db()
+    prop = get_proposal(proposal_id, user_id)
+    if not prop:
+        return None
+
+    locked = set(prop.get("locked_steps") or [])
+    if step_num not in locked:
+        locked.add(step_num)
+        update_proposal(proposal_id, {"locked_steps": sorted(locked)}, user_id=user_id)
+    return get_proposal(proposal_id, user_id)
 
 
 def delete_proposal(proposal_id: str, user_id: Optional[str] = None) -> bool:
