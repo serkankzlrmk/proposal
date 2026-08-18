@@ -1,0 +1,49 @@
+donor_id: api_test_call
+display_name: API Test Call
+template_standard: Custom Donor Call Manifest
+version: 1.0.0
+currency: USD
+budget_max: null
+max_duration_months: null
+deadline: '2026-11-15'
+scoring_weights:
+  section_coverage: 30.0
+  source_citations: 25.0
+  smart_criteria: 20.0
+  donor_keywords: 15.0
+  budget_alignment: 10.0
+sections:
+  mandatory: []
+max_char_limits: {}
+min_source_ratio: 0.75
+overhead_cap_percent: 7.0
+mandatory_keywords:
+- accountability to affected populations
+- do no harm
+- protection mainstreaming
+- humanitarian principles
+smart_indicators:
+  required_dimensions:
+  - specific
+  - measurable
+  - achievable
+  - relevant
+  - time_bound
+hard_eligibility_gates:
+  sadd_disaggregation_mandatory: true
+  cluster_coordination_mandatory: true
+  psea_policy_mandatory: true
+  sphere_standards_mandatory: true
+  min_displaced_ratio: 0.5
+pass_threshold: 70.0
+meta:
+  source: call_ingest
+  deadline: '2026-11-15'
+  requirements:
+  - All indicators must include Sex, Age and Disability Disaggregation (SADD).
+  - Applicants must demonstrate PSEA policy compliance and Code of Conduct.
+  - Cluster coordination with the WASH and Protection clusters is mandatory.
+  - Interventions must align with Sphere standards (15L/person/day minimum).
+  - At least 50% of beneficiaries must be IDPs or refugees.
+  - Overhead / indirect costs must not exceed 7 percent of direct costs.
+  created_at: 1787079227.825523

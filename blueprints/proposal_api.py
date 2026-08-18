@@ -159,6 +159,98 @@ def remove_proposal(proposal_id: str):
     return jsonify({"status": "deleted", "id": proposal_id})
 
 
+@proposal_api_bp.route("/<proposal_id>/generate-context", methods=["POST"])
+def handle_generate_context(proposal_id: str):
+    """Draft Step 1 context fields with AI (manifest-aware + live evidence).
+
+    Uses the donor manifest (country/theme/deadline/budget constraints) and
+    Sightline evidence (ReliefWeb/HDX) to draft humanitarian_situation,
+    needs_assessment and beneficiary estimates. The user edits afterwards.
+    """
+    prop = get_proposal(proposal_id)
+    if not prop:
+        return jsonify({"error": "Proposal not found"}), 404
+
+    ctx = prop.get("context_data") or {}
+    donor = prop.get("donor", "OCHA_CBPF")
+    country = ctx.get("country") or prop.get("country", "")
+    theme = ctx.get("theme") or prop.get("theme", "")
+
+    # ── Manifest constraints (call-specific: TRY budget, deadline, gates) ──
+    manifest_block = ""
+    try:
+        from engine.yaml_rules import YamlDonorRuleLoader
+        from engine.donor_resolver import resolve_donor_id
+
+        loader = YamlDonorRuleLoader()
+        manifest = loader.load(resolve_donor_id(donor))
+        if manifest is not None:
+            manifest_block = (
+                f"Donor: {manifest.display_name}\n"
+                f"Currency: {manifest.currency} | Budget max: {manifest.budget_max or 'n/a'} | "
+                f"Duration: {manifest.max_duration_months or 'n/a'} months | Deadline: {manifest.deadline or 'n/a'}\n"
+                f"Mandatory keywords: {', '.join(manifest.mandatory_keywords) or 'none'}\n"
+                f"Mandatory sections: {', '.join(manifest.mandatory_sections) or 'none'}"
+            )
+    except Exception as e:
+        logger.warning("Manifest context failed: %s", e)
+
+    # ── Live evidence (Sightline bridge) ────────────────────────────────────
+    evidence_block = ""
+    try:
+        from engine.evidence import collect_evidence, evidence_to_prompt, ascii_country, country_code_for
+
+        ev = collect_evidence(
+            country=ascii_country(country),
+            theme=theme,
+            country_code=country_code_for(country),
+        )
+        evidence_block = evidence_to_prompt(ev, max_chars=2500)
+    except Exception as e:
+        logger.debug("Evidence collection skipped: %s", e)
+
+    prompt = f"""
+    Draft the Step 1 context fields for a {donor} proposal in {country} ({theme}).
+
+    DONOR/CALL CONSTRAINTS:
+    {manifest_block}
+
+    {evidence_block}
+
+    Return ONLY a JSON object with these fields:
+    {{
+      "title": "project title (donor-aligned, max 12 words)",
+      "humanitarian_situation": "2-3 sentences: acute triggers, displacement, geographical prioritization",
+      "needs_assessment": "2-3 sentences: sectoral gaps, Sphere deficits, protection/PSEA risks",
+      "beneficiaries_total": 20000,
+      "beneficiaries_displaced": 11000
+    }}
+    Use real figures from the evidence when available. Do NOT invent numbers.
+    """
+
+    from engine.generator import _call_llm
+
+    raw = _call_llm(prompt, temperature=0.3, action="generate_context")
+    if raw:
+        try:
+            clean = raw.strip()
+            if clean.startswith("```"):
+                clean = clean.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            parsed = json.loads(clean)
+            if isinstance(parsed, dict):
+                # Merge into context_data (keep existing fields, overwrite drafted ones)
+                new_ctx = dict(ctx)
+                for k in ("title", "humanitarian_situation", "needs_assessment", "beneficiaries_total", "beneficiaries_displaced"):
+                    if k in parsed and parsed[k] not in (None, ""):
+                        new_ctx[k] = parsed[k]
+                update_proposal(proposal_id, {"context_data": new_ctx, "title": parsed.get("title") or prop.get("title")})
+                return jsonify({"status": "ok", "context_data": new_ctx, "title": parsed.get("title") or prop.get("title")})
+        except Exception as e:
+            logger.warning("Context draft unparseable: %s", e)
+
+    return jsonify({"error": "AI draft failed; fill the fields manually."}), 502
+
+
 @proposal_api_bp.route("/<proposal_id>/generate-toc", methods=["POST"])
 def handle_generate_toc(proposal_id: str):
     """Trigger AI Theory of Change generation."""

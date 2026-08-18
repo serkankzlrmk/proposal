@@ -41,6 +41,7 @@
     inputNeeds: document.getElementById('inputNeeds'),
     inputBeneficiariesTotal: document.getElementById('inputBeneficiariesTotal'),
     inputBeneficiariesDisplaced: document.getElementById('inputBeneficiariesDisplaced'),
+    btnAiGenerateContext: document.getElementById('btnAiGenerateContext'),
     btnSaveStep1: document.getElementById('btnSaveStep1'),
     // Step 2 Inputs
     btnAiGenerateToc: document.getElementById('btnAiGenerateToc'),
@@ -625,6 +626,28 @@
     document.getElementById('landingView').style.display = 'none';
     document.getElementById('workspace').style.display = 'block';
     await loadProposal(pid);
+  }
+
+  // ── Step 1: AI Context Drafting ─────────────────────────────────────────
+  async function handleGenerateContext() {
+    if (!state.activeProposalId) { alert('Create/select a proposal first.'); return; }
+    el.btnAiGenerateContext.disabled = true;
+    el.btnAiGenerateContext.textContent = 'Drafting context...';
+    try {
+      const res = await api(`/api/proposals/${state.activeProposalId}/generate-context`, { method: 'POST' });
+      const ctx = res.context_data || {};
+      if (res.title) el.inputTitle.value = res.title;
+      if (ctx.humanitarian_situation) el.inputHumSit.value = ctx.humanitarian_situation;
+      if (ctx.needs_assessment) el.inputNeeds.value = ctx.needs_assessment;
+      if (ctx.beneficiaries_total) el.inputBeneficiariesTotal.value = ctx.beneficiaries_total;
+      if (ctx.beneficiaries_displaced) el.inputBeneficiariesDisplaced.value = ctx.beneficiaries_displaced;
+      triggerAutosave();
+    } catch (e) {
+      alert(`Context draft failed: ${e.message}`);
+    } finally {
+      el.btnAiGenerateContext.disabled = false;
+      el.btnAiGenerateContext.textContent = 'Generate Context with AI';
+    }
   }
 
   // ── Step 6: Donor Call Ingestion ────────────────────────────────────────
@@ -1270,6 +1293,9 @@
         });
       });
     }
+
+    // Step 1: AI Context Drafting
+    el.btnAiGenerateContext.addEventListener('click', handleGenerateContext);
 
     // Step 6: Donor Call Ingestion
     el.btnIngestCall.addEventListener('click', handleIngestCall);
