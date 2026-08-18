@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sightline — Proposal Design Pipeline & GMS Grant Engine</title>
+  <link rel="stylesheet" href="/static/css/proposal.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+</head>
+<body>
+
+  <!-- Top App Header -->
+  <header class="app-header">
+    <div class="brand-group">
+      <span class="brand-badge">SIGHTLINE</span>
+      <span class="brand-title">Grant Management Proposal Engine</span>
+      <span id="activeDonorBadge" style="font-size: 11px; background: #1e293b; color: #38bdf8; padding: 2px 8px; border-radius: 4px; border: 1px solid #334155;">OCHA_CBPF</span>
+    </div>
+
+    <div class="header-actions">
+      <span id="autosaveIndicator" class="autosave-status saved">
+        <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:currentColor;"></span>
+        <span>All changes saved</span>
+      </span>
+      <select id="proposalSelect" class="input-select" style="width: 220px; padding: 5px 8px; font-size: 12px;">
+        <option value="">-- Select or Create Proposal --</option>
+      </select>
+      <button id="btnNewProposal" class="btn btn-sm btn-primary">+ New Proposal</button>
+    </div>
+  </header>
+
+  <!-- Main Split Layout -->
+  <main class="main-layout">
+    
+    <!-- Left Workspace (65%) -->
+    <section class="workspace-pane">
+      
+      <!-- Step Navigation Bar -->
+      <nav class="step-nav">
+        <button class="step-btn active" data-step="1">
+          <span class="step-num">1</span> Context & Targeting
+        </button>
+        <button class="step-btn" data-step="2">
+          <span class="step-num">2</span> Theory of Change
+        </button>
+        <button class="step-btn" data-step="3">
+          <span class="step-num">3</span> 4x4 Logframe Matrix
+        </button>
+        <button class="step-btn" data-step="4">
+          <span class="step-num">4</span> Narrative Drafting
+        </button>
+        <button class="step-btn" data-step="5">
+          <span class="step-num">5</span> Verifier Audit & PDF
+        </button>
+      </nav>
+
+      <!-- Step Content Area -->
+      <div class="step-content">
+
+        <!-- ── Step 1: Context & Targeting ──────────────────────────────────── -->
+        <div id="stepContainer1" class="step-view">
+          <div class="step-header-area">
+            <div>
+              <h2 class="step-title">Project Context & Donor Specifications</h2>
+              <p class="step-subtitle">Define target country, donor guidelines (OCHA, USAID, EU), and vulnerable beneficiary quotas.</p>
+            </div>
+            <button id="btnSaveStep1" class="btn btn-primary">Save & Continue -></button>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">Project Title</label>
+              <input type="text" id="inputTitle" class="input-text" placeholder="e.g. Emergency WASH & Protection for Conflict-Affected IDPs">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Target Country / Region</label>
+              <input type="text" id="inputCountry" class="input-text" placeholder="e.g. Sudan (Darfur)">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Target Donor Framework</label>
+              <select id="selectDonor" class="input-select">
+                <option value="OCHA_CBPF">UN OCHA CBPF (GPPi 8+3 Harmonized)</option>
+                <option value="USAID_BHA">USAID BHA (Emergency Application Guidelines - EAG)</option>
+                <option value="EU_PRAG">EU EuropeAid / ECHO (PRAG Guidelines)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Sector / Cluster Theme</label>
+              <input type="text" id="inputTheme" class="input-text" placeholder="e.g. WASH, Protection, Health, Shelter">
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label class="form-label">Humanitarian Situation & Crisis Background</label>
+            <textarea id="inputHumSit" class="input-textarea" placeholder="Describe the acute humanitarian triggers, conflict displacement, and geographical prioritization..."></textarea>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label class="form-label">Sectoral Needs Assessment & Vulnerabilities</label>
+            <textarea id="inputNeeds" class="input-textarea" placeholder="Detail specific gaps, Sphere standard deficits (e.g. < 15L water/day), and protection/PSEA risks..."></textarea>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">Total Beneficiaries Reached</label>
+              <input type="number" id="inputBeneficiariesTotal" class="input-text" value="20000">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Displaced (IDPs / Refugees)</label>
+              <input type="number" id="inputBeneficiariesDisplaced" class="input-text" value="11000">
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Step 2: Theory of Change ─────────────────────────────────────── -->
+        <div id="stepContainer2" class="step-view" style="display: none;">
+          <div class="step-header-area">
+            <div>
+              <h2 class="step-title">Theory of Change (ToC) Impact Chain</h2>
+              <p class="step-subtitle">Causal transformation pathway from immediate inputs to sustainable resilience.</p>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button id="btnAiGenerateToc" class="btn btn-primary">⚡ Generate ToC with AI</button>
+              <button id="btnNextStep2" class="btn">Next: Logframe -></button>
+            </div>
+          </div>
+
+          <div id="tocVisualizer" class="toc-flow">
+            <!-- Rendered dynamically by JS -->
+          </div>
+
+          <div style="margin-top: 20px;">
+            <h3 style="font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 8px;">Key Assumptions & Causal Hypotheses</h3>
+            <ul id="tocAssumptionsList" style="list-style: disc; padding-left: 20px; color: var(--text-muted); font-size: 12.5px; line-height: 1.8;">
+              <!-- Assumptions list -->
+            </ul>
+          </div>
+        </div>
+
+        <!-- ── Step 3: 4x4 Logframe Matrix ──────────────────────────────────── -->
+        <div id="stepContainer3" class="step-view" style="display: none;">
+          <div class="step-header-area">
+            <div>
+              <h2 class="step-title">4x4 Logical Framework (Logframe Matrix)</h2>
+              <p class="step-subtitle">Fully editable matrix. Changes autosave automatically.</p>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button id="btnAiGenerateLogframe" class="btn btn-primary">⚡ Generate Logframe with AI</button>
+              <button id="btnNextStep3" class="btn">Next: Narrative -></button>
+            </div>
+          </div>
+
+          <div class="logframe-container">
+            <table class="logframe-table">
+              <thead>
+                <tr>
+                  <th style="width: 14%;">Results Level</th>
+                  <th style="width: 25%;">Intervention Logic</th>
+                  <th style="width: 22%;">Objectively Verifiable Indicators (OVI)</th>
+                  <th style="width: 20%;">Sources of Verification (MoV)</th>
+                  <th style="width: 19%;">Assumptions & Risks</th>
+                </tr>
+              </thead>
+              <tbody id="logframeBody">
+                <!-- Editable rows rendered dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ── Step 4: Narrative Drafting ───────────────────────────────────── -->
+        <div id="stepContainer4" class="step-view" style="display: none;">
+          <div class="step-header-area">
+            <div>
+              <h2 class="step-title">Donor Narrative Drafting</h2>
+              <p class="step-subtitle">Sections formatted per donor regulations with real-time character limit validation.</p>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button id="btnAiGenerateNarrative" class="btn btn-primary">⚡ Draft All Sections with AI</button>
+              <button id="btnNextStep4" class="btn">Next: Verifier Audit -></button>
+            </div>
+          </div>
+
+          <div id="narrativeTabsHeader" style="display: flex; gap: 6px; margin-bottom: 16px; overflow-x: auto;">
+            <!-- Section tabs rendered dynamically -->
+          </div>
+
+          <div id="narrativeSectionsContainer">
+            <!-- Active section textarea and counter rendered dynamically -->
+          </div>
+        </div>
+
+        <!-- ── Step 5: Verifier Audit & PDF ────────────────────────────────── -->
+        <div id="stepContainer5" class="step-view" style="display: none;">
+          <div class="step-header-area">
+            <div>
+              <h2 class="step-title">Blind Verifier Audit & Publication</h2>
+              <p class="step-subtitle">Independent compliance audit and sub-10ms Typst PDF document generation.</p>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button id="btnRunVerifier" class="btn btn-primary">🛡️ Run Verifier Audit</button>
+              <button id="btnExportPdf" class="btn btn-emerald">📥 Download Typst PDF</button>
+            </div>
+          </div>
+
+          <!-- Verifier Scorecard -->
+          <div id="verifierScorecard" class="verifier-card">
+            <div id="scoreBanner" class="score-banner pass">
+              <div>
+                <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.05em; color: var(--accent-emerald);">AUTOMATED DONOR COMPLIANCE VERIFICATION</div>
+                <div id="verifierSummaryText" style="font-size: 13.5px; color: #fff; margin-top: 4px;">Proposal satisfies all donor constraints and Sphere minimum standards.</div>
+              </div>
+              <div id="verifierScoreVal" class="score-num">94/100</div>
+            </div>
+
+            <h3 style="font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 10px;">Audit Findings & Recommendations</h3>
+            <div id="verifierIssuesList">
+              <!-- Issue items rendered dynamically -->
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Right AI Advisor Pane (35%) -->
+    <aside class="advisor-pane">
+      <div class="advisor-header">
+        <div class="advisor-title">
+          <span style="color: var(--accent-cyan);">⚡</span> AI Project Advisor
+        </div>
+        <span style="font-size: 11px; color: var(--text-dim);">Blind Verifier Assistant</span>
+      </div>
+
+      <div id="advisorMessages" class="advisor-messages">
+        <div class="msg-bubble msg-advisor">
+          Hello! I am your <strong>GMS Project Design Advisor</strong>. I can help refine your Theory of Change, audit Logframe indicators against Sphere standards, and ensure 100% compliance with donor criteria.
+        </div>
+      </div>
+
+      <div class="advisor-input-area">
+        <input type="text" id="advisorInput" class="input-text" placeholder="Ask advisor (e.g. Are my WASH indicators SMART?)...">
+        <button id="btnSendAdvisor" class="btn btn-primary">Send</button>
+      </div>
+    </aside>
+
+  </main>
+
+  <!-- Main Vanilla JS Coordinator -->
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

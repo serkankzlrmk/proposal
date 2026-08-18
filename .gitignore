@@ -1,0 +1,29 @@
+# ── Python ─────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# ── Virtual env ─────────────────────────────────────────
+.venv/
+venv/
+
+# ── Secrets ─────────────────────────────────────────────
+.env
+.env.*
+
+# ── Runtime data (asla commit'e girmez) ─────────────────
+data/*.db
+data/*.db-*
+output/*.pdf
+*.sqlite
+*.sqlite3
+
+# ── OS / editor ─────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp

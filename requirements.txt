@@ -1,0 +1,6 @@
+flask
+flask-cors
+httpx
+python-dotenv
+typst
+pytest
