@@ -25,9 +25,9 @@ def make_proposal(**over):
     base = {
         "setup_id": "setup_test",
         "narrative_data": {
-            "project_summary": "Summary with citation [ref: RW-001] and SADD disaggregation.",
-            "humanitarian_situation": "Context paragraph [source: HDX-002].",
-            "needs_assessment": "Gap analysis with protection and gender keywords, cluster coordination.",
+            "project_summary": "Summary with citation [ref: RW-001], SADD disaggregation and GBV protection mainstreaming.",
+            "humanitarian_situation": "Context paragraph [source: HDX-002] with humanitarian principles.",
+            "needs_assessment": "Gap analysis with protection, PSEA and gender keywords, cluster coordination, sphere standards.",
             "beneficiaries": "Targets 12,000 IDPs [ref: OCHA-003].",
             "justification": "Local partner and SADD disaggregated targets.",
         },
@@ -114,7 +114,8 @@ def test_budget_alignment_over_cap(engine):
     prop["budget_data"] = {"overhead_percent": 8.19}
     result = engine.score("ocha_cbpf", prop)
     ba = [t for t in result["trace"] if t["criterion"] == "budget_alignment"][0]
-    assert ba["score"] == pytest.approx(8.3, abs=0.1)
+    # Canonical SPEC LINEAR PENALTY: max(0, 10 - (8.19 - 7.0) * 5) = 4.05
+    assert ba["score"] == pytest.approx(4.05, abs=0.05)
 
 
 def test_budget_cap_is_donor_specific(engine):
@@ -171,7 +172,7 @@ def test_quota_sadd_missing_rejects(engine):
     }
     result = engine.score("ocha_cbpf", prop)
     assert result["eligibility"]["status"] == "AUTOMATIC_REJECTION"
-    assert "sadd_disaggregation" in result["eligibility"]["failed_quotas"]
+    assert "sadd_disaggregation_mandatory" in result["eligibility"]["failed_quotas"]
 
 
 def test_quota_min_displaced_ratio(engine):
@@ -251,3 +252,70 @@ def test_evaluate_rule_safely_happy():
 
     result = evaluate_rule_safely(ok, default_weight=10)
     assert result["score"] == 10.0
+
+
+# ── Root-level canonical schema (ARCHITECTURAL_DECISIONS #1) ─────────────
+def test_manifest_is_root_level_pydantic(engine):
+    """Loader returns a validated DonorManifest with root-level attributes."""
+    manifest = engine.loader.load("ocha_cbpf")
+    assert manifest.donor_id == "ocha_cbpf"
+    assert manifest.display_name.startswith("UN OCHA")
+    assert manifest.min_source_ratio == 0.75
+    assert manifest.overhead_cap_percent == 7.0
+    assert "sadd" in manifest.mandatory_keywords
+    assert manifest.hard_eligibility_gates.get("sadd_disaggregation_mandatory") is True
+    assert manifest.mandatory_sections == [
+        "project_summary", "humanitarian_situation", "needs_assessment",
+        "beneficiaries", "justification",
+    ]
+
+
+def test_manifest_root_gates_drive_engine(engine):
+    """Canonical root-level hard_eligibility_gates drive AUTOMATIC_REJECTION."""
+    prop = make_proposal()
+    # Remove PSEA term (root-level psea_policy_mandatory) -> HARD FAIL
+    prop["narrative_data"] = {
+        "project_summary": "Summary with citation [ref: RW-001], SADD disaggregation and GBV protection mainstreaming.",
+        "humanitarian_situation": "Context paragraph [source: HDX-002] with humanitarian principles.",
+        "needs_assessment": "Gap analysis with protection, gender keywords, cluster coordination, sphere standards.",
+        "beneficiaries": "Targets 12,000 IDPs [ref: OCHA-003].",
+        "justification": "Local partner and SADD disaggregated targets.",
+    }
+    result = engine.score("ocha_cbpf", prop)
+    assert result["eligibility"]["status"] == "AUTOMATIC_REJECTION"
+    assert "psea_policy_mandatory" in result["eligibility"]["failed_quotas"]
+    # Gate check carries the canonical key + human title
+    psea_check = [c for c in result["eligibility"]["checks"] if c["quota"] == "psea_policy_mandatory"][0]
+    assert psea_check["title"] == "PSEA Policy & Safeguarding"
+
+
+def test_legacy_rules_shape_normalized(tmp_path, engine):
+    """v1 nested rules: shape is normalized to the root-level canonical schema."""
+    legacy = {
+        "donor_id": "legacy_donor",
+        "name": "Legacy Donor",
+        "rules": {
+            "sections": {
+                "mandatory": ["alpha", "beta"],
+                "limits": {"alpha": {"max_chars": 1000}},
+            },
+            "citations": {"min_source_ratio": 0.60},
+            "keywords": {"expected_tokens": ["foo", "bar"]},
+            "budget": {"max_overhead_percent": 9.0},
+            "smart_indicators": {"required_dimensions": ["specific", "measurable"]},
+            "quota_requirements": {"sadd_disaggregation": True},
+        },
+    }
+    (tmp_path / "legacy_donor.yaml").write_text(
+        __import__("yaml").safe_dump(legacy), encoding="utf-8"
+    )
+    loader = YamlDonorRuleLoader(donors_dir=tmp_path)
+    manifest = loader.load("legacy_donor")
+    assert manifest.display_name == "Legacy Donor"
+    assert manifest.min_source_ratio == 0.60
+    assert manifest.overhead_cap_percent == 9.0
+    assert manifest.mandatory_keywords == ["foo", "bar"]
+    assert manifest.mandatory_sections == ["alpha", "beta"]
+    assert manifest.max_char_limits == {"alpha": 1000}
+    # legacy quota key aliased to canonical gate key
+    assert manifest.hard_eligibility_gates.get("sadd_disaggregation_mandatory") is True

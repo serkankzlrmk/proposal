@@ -1,21 +1,22 @@
 """
-proposal/engine/yaml_rules.py — YAML-DRIVEN DONOR RULE LOADER & SCORING ENGINE.
+proposal/engine/yaml_rules.py — ROOT-LEVEL DONOR RULE LOADER & SCORING ENGINE.
 
-Implements the NotebookLM technical specification (v2 refinement):
-  - /donors/<donor_id>.yaml manifests (declarative, zero-code donor extension)
-  - YamlDonorRuleLoader with schema validation and default fallback handling
-  - Deterministic 5-criterion scoring engine (30/25/20/15/10 = 100)
+Implements the Master Architectural Specification (AGENT_MASTER_IMPLEMENTATION_SPEC.md)
++ ARCHITECTURAL_DECISIONS_RESPONSE (v1.1.0):
+  - /donors/<donor_id>.yaml manifests are ROOT-LEVEL declarative schemas,
+    validated 1-to-1 via Pydantic `DonorManifest` (engine/models.py).
+  - Deterministic 5-criterion scoring engine (30/25/20/15/10 = 100).
+  - Budget alignment uses the SPEC LINEAR PENALTY formula:
+        overhead <= cap -> 10.0, else max(0, 10 - (overhead - cap) * 5)
   - SMART validation: regex + structural checks (measurable/time_bound/
-    disaggregation); full semantic SMART stays in the Blind Verifier
+    disaggregation); full semantic SMART stays in the Blind Verifier.
   - Source citations: standardized [ref: SOURCE_ID] / [source: X] format,
-    verified against the loaded reference registry when present
-  - Quota requirements: HARD PASS/FAIL gates -> AUTOMATIC_REJECTION flag
-    (a 90/100 text score with a failed donor quota = desk rejection)
-  - Graceful fallback: missing rules -> 0 points + WARNING_MISSING_RULE
-
-Design goals:
-  - Adding a new donor = adding one YAML file. Engine untouched.
-  - Missing rules never crash evaluation.
+    verified against the loaded reference registry when present.
+  - Hard eligibility gates (root-level hard_eligibility_gates):
+    PASS/FAIL -> AUTOMATIC_REJECTION flag regardless of text score.
+    Unverifiable gates warn but do not fail.
+  - Graceful fallback: missing rules -> 0 points + WARNING_MISSING_RULE.
+    Adding a donor = one YAML file. Missing rules never crash evaluation.
 """
 
 from __future__ import annotations
@@ -27,15 +28,9 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-logger = logging.getLogger(__name__)
+from engine.models import DEFAULT_WEIGHTS, DonorManifest
 
-DEFAULT_WEIGHTS = {
-    "section_coverage": 30,
-    "source_citations": 25,
-    "smart_criteria": 20,
-    "donor_keywords": 15,
-    "budget_alignment": 10,
-}
+logger = logging.getLogger(__name__)
 
 DEFAULT_DONOR_ID = "ocha_cbpf"
 
@@ -64,6 +59,26 @@ SMART_PATTERNS = {
     ),
 }
 
+# ── Hard gate alias map (root-level gate key -> evaluator + display name) ──
+# Canonical keys come from the spec manifest; legacy keys (v1 YAML) are
+# accepted and normalized so old manifests keep working without edits.
+GATE_ALIASES = {
+    "sadd_disaggregation": "sadd_disaggregation_mandatory",
+    "cluster_coordination": "cluster_coordination_mandatory",
+    "psea": "psea_policy_mandatory",
+    "sphere_standards": "sphere_standards_mandatory",
+}
+
+GATE_TITLES = {
+    "sadd_disaggregation_mandatory": "SADD Disaggregation (Sex, Age, Disability)",
+    "cluster_coordination_mandatory": "Cluster Coordination",
+    "psea_policy_mandatory": "PSEA Policy & Safeguarding",
+    "sphere_standards_mandatory": "Sphere Standards Alignment",
+    "min_displaced_ratio": "Minimum Displaced Population Ratio",
+    "min_capacity_score": "Institutional Capacity Threshold",
+    "capacity_threshold_score": "Institutional Capacity Threshold",
+}
+
 # ── Rule evaluation with graceful fallback ─────────────────────────────────
 def evaluate_rule_safely(rule_function, default_weight: float = 0.0) -> Dict[str, Any]:
     """Evaluate a rule; on missing definition return 0 points + soft warning."""
@@ -87,17 +102,21 @@ def evaluate_rule_safely(rule_function, default_weight: float = 0.0) -> Dict[str
 
 # ── Loader ─────────────────────────────────────────────────────────────────
 class YamlDonorRuleLoader:
-    """Load and validate donor manifests from /donors/*.yaml."""
+    """Load and validate root-level donor manifests from /donors/*.yaml."""
 
     def __init__(self, donors_dir: Optional[Path] = None) -> None:
         self.donors_dir = Path(donors_dir) if donors_dir else Path(__file__).resolve().parent.parent / "donors"
-        self._cache: Dict[str, Dict[str, Any]] = {}
+        self._cache: Dict[str, DonorManifest] = {}
 
     def list_donors(self) -> List[str]:
         return sorted(p.stem for p in self.donors_dir.glob("*.yaml"))
 
-    def load(self, donor_id: str) -> Dict[str, Any]:
-        """Load a donor manifest; fall back to default donor on missing file."""
+    def load(self, donor_id: str) -> DonorManifest:
+        """Load a donor manifest; fall back to default donor on missing file.
+
+        Returns a validated DonorManifest (engine/models.py). Zero-crash:
+        missing/unreadable manifest -> DEFAULT_DONOR_ID with a warning.
+        """
         if donor_id in self._cache:
             return self._cache[donor_id]
 
@@ -108,37 +127,82 @@ class YamlDonorRuleLoader:
             path = self.donors_dir / f"{donor_id}.yaml"
 
         with open(path, "r", encoding="utf-8") as f:
-            manifest = yaml.safe_load(f) or {}
+            raw = yaml.safe_load(f) or {}
 
-        manifest = self._validate(manifest, donor_id)
+        manifest = self._validate(raw, donor_id)
         self._cache[donor_id] = manifest
         return manifest
 
-    def _validate(self, manifest: Dict[str, Any], donor_id: str) -> Dict[str, Any]:
-        """Schema validation with graceful defaults for missing fields."""
-        manifest.setdefault("donor_id", donor_id)
-        manifest.setdefault("name", donor_id.upper())
-        manifest.setdefault("version", "0.0.0")
-        manifest.setdefault("scoring_weights", dict(DEFAULT_WEIGHTS))
-        manifest.setdefault("rules", {})
-        manifest.setdefault("pass_threshold", 70)
+    def _validate(self, raw: Dict[str, Any], donor_id: str) -> DonorManifest:
+        """Pydantic validation with graceful defaults for missing fields."""
+        # Legacy v1 shape (rules: {sections/citations/keywords/budget/...}) is
+        # normalized to the root-level canonical schema so old YAMLs load.
+        raw = self._normalize_legacy(raw, donor_id)
+        raw.setdefault("donor_id", donor_id)
+        raw.setdefault("display_name", donor_id.upper())
+        raw.setdefault("version", "0.0.0")
+        return DonorManifest(**raw)
 
-        # Merge missing weights with defaults (never drop defined ones)
-        weights = manifest["scoring_weights"]
-        for k, v in DEFAULT_WEIGHTS.items():
-            weights.setdefault(k, v)
+    @staticmethod
+    def _normalize_legacy(raw: Dict[str, Any], donor_id: str) -> Dict[str, Any]:
+        """Map v1 nested `rules:` shape onto root-level canonical fields."""
+        rules = raw.get("rules")
+        if not isinstance(rules, dict):
+            return raw
 
-        # Rules sub-sections default to empty dicts
-        rules = manifest["rules"]
-        for section in ("sections", "citations", "smart_indicators", "keywords", "budget", "quota_requirements"):
-            rules.setdefault(section, {})
+        out = dict(raw)
+        out.pop("rules", None)
 
-        return manifest
+        # name -> display_name (v1 used `name`)
+        if "name" in out and "display_name" not in out:
+            out["display_name"] = out["name"]
+
+        # rules.sections -> sections + max_char_limits
+        sec = rules.get("sections") or {}
+        if isinstance(sec, dict):
+            out.setdefault("sections", {})
+            out["sections"].setdefault("mandatory", sec.get("mandatory", []))
+            limits = sec.get("limits") or {}
+            if isinstance(limits, dict):
+                out["max_char_limits"] = {
+                    k: (v.get("max_chars") if isinstance(v, dict) else v)
+                    for k, v in limits.items()
+                }
+
+        # rules.citations.min_source_ratio -> min_source_ratio
+        cit = rules.get("citations") or {}
+        if isinstance(cit, dict) and "min_source_ratio" in cit:
+            out.setdefault("min_source_ratio", cit["min_source_ratio"])
+
+        # rules.keywords.expected_tokens -> mandatory_keywords
+        kw = rules.get("keywords") or {}
+        if isinstance(kw, dict) and kw.get("expected_tokens"):
+            out.setdefault("mandatory_keywords", kw["expected_tokens"])
+
+        # rules.budget.max_overhead_percent -> overhead_cap_percent
+        bdg = rules.get("budget") or {}
+        if isinstance(bdg, dict) and "max_overhead_percent" in bdg:
+            out.setdefault("overhead_cap_percent", bdg["max_overhead_percent"])
+
+        # rules.smart_indicators -> smart_indicators
+        sm = rules.get("smart_indicators") or {}
+        if isinstance(sm, dict):
+            out.setdefault("smart_indicators", sm)
+
+        # rules.quota_requirements -> hard_eligibility_gates (aliased)
+        qq = rules.get("quota_requirements") or {}
+        if isinstance(qq, dict) and qq:
+            gates = {}
+            for k, v in qq.items():
+                gates[GATE_ALIASES.get(k, k)] = v
+            out.setdefault("hard_eligibility_gates", gates)
+
+        return out
 
 
 # ── Scoring engine ─────────────────────────────────────────────────────────
 class DonorScoringEngine:
-    """Deterministic scoring against a donor manifest. Total = 100 points.
+    """Deterministic scoring against a DonorManifest. Total = 100 points.
 
     Result shape:
       {setup_id, donor_id, donor_name, total_score, pass_threshold, passed,
@@ -174,31 +238,35 @@ class DonorScoringEngine:
                     ref_ids.add(r.upper())
         return ref_ids
 
-    # -- quota evaluation (HARD GATES) -----------------------------------
-    def _evaluate_quotas(self, manifest: Dict[str, Any], proposal: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Evaluate donor quota_requirements as pass/fail gates.
+    # -- hard eligibility gates (root-level) ------------------------------
+    def _evaluate_gates(self, manifest: DonorManifest, proposal: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Evaluate hard_eligibility_gates as PASS/FAIL gates.
 
-        A verifiable failed quota triggers AUTOMATIC_REJECTION regardless of
+        A verifiable failed gate triggers AUTOMATIC_REJECTION regardless of
         the text score (matches real donor desk-review behavior).
-        Unverifiable quotas (missing data) warn but do not fail.
+        Unverifiable gates (missing data) warn but do not fail.
         """
-        quotas = manifest["rules"].get("quota_requirements", {})
+        gates = manifest.hard_eligibility_gates or {}
         blob = self._narrative_blob(proposal)
         context = proposal.get("context_data") or {}
         beneficiaries = context.get("beneficiaries") or {}
         budget_data = proposal.get("budget_data") or {}
 
         checks: List[Dict[str, Any]] = []
-        for name, spec in quotas.items():
+        for name, spec in gates.items():
+            # Normalize aliased gate keys (legacy manifests)
+            canonical = GATE_ALIASES.get(name, name)
+            title = GATE_TITLES.get(canonical, name.replace("_", " ").title())
             check = {
-                "quota": name,
+                "quota": canonical,
+                "title": title,
                 "required": spec,
                 "verifiable": False,
                 "passed": False,
                 "details": "",
             }
             try:
-                if name == "sadd_disaggregation" and spec is True:
+                if canonical == "sadd_disaggregation_mandatory" and spec is True:
                     check["verifiable"] = True
                     check["passed"] = bool(re.search(r"\b(sadd|sex|age|gender|disaggregat)\w*", blob))
                     check["details"] = (
@@ -206,21 +274,21 @@ class DonorScoringEngine:
                         if check["passed"]
                         else "No SADD/disaggregation terms in narrative"
                     )
-                elif name == "cluster_coordination_mandatory" and spec is True:
+                elif canonical == "cluster_coordination_mandatory" and spec is True:
                     check["verifiable"] = True
                     check["passed"] = "cluster coordination" in blob
                     check["details"] = (
                         "'cluster coordination' present" if check["passed"] else "'cluster coordination' missing"
                     )
-                elif name == "psea_mandatory" and spec is True:
+                elif canonical == "psea_policy_mandatory" and spec is True:
                     check["verifiable"] = True
                     check["passed"] = "psea" in blob
                     check["details"] = "'PSEA' present" if check["passed"] else "'PSEA' missing"
-                elif name == "sphere_standards_mandatory" and spec is True:
+                elif canonical == "sphere_standards_mandatory" and spec is True:
                     check["verifiable"] = True
                     check["passed"] = "sphere" in blob
                     check["details"] = "'Sphere standards' present" if check["passed"] else "'Sphere standards' missing"
-                elif name == "min_displaced_ratio":
+                elif canonical == "min_displaced_ratio":
                     total = beneficiaries.get("total", 0) or 0
                     displaced = beneficiaries.get("idp_refugee", 0) or 0
                     if total:
@@ -230,7 +298,7 @@ class DonorScoringEngine:
                         check["details"] = f"Displaced ratio {ratio:.0%} vs required {float(spec):.0%}"
                     else:
                         check["details"] = "No beneficiaries data — not verifiable"
-                elif name == "capacity_threshold_score":
+                elif canonical in ("min_capacity_score", "capacity_threshold_score"):
                     score = budget_data.get("capacity_score") or context.get("capacity_score")
                     if score is not None:
                         check["verifiable"] = True
@@ -239,9 +307,9 @@ class DonorScoringEngine:
                     else:
                         check["details"] = "No capacity score data — not verifiable"
                 else:
-                    check["details"] = "Unsupported quota — ignored (graceful)"
-            except Exception as e:  # never crash on a quota
-                check["details"] = f"Quota evaluation error: {e}"
+                    check["details"] = "Unsupported gate — ignored (graceful)"
+            except Exception as e:  # never crash on a gate
+                check["details"] = f"Gate evaluation error: {e}"
             checks.append(check)
         return checks
 
@@ -249,14 +317,12 @@ class DonorScoringEngine:
     def score(self, donor_id: str, proposal: Dict[str, Any]) -> Dict[str, Any]:
         """Score a proposal snapshot. Returns total_score + trace + eligibility."""
         manifest = self.loader.load(donor_id)
-        weights = manifest["scoring_weights"]
-        rules = manifest["rules"]
-
+        weights = manifest.merged_weights()
         trace: List[Dict[str, Any]] = []
 
         # 1. section_coverage (30)
         def _section_coverage():
-            mandatory = rules["sections"].get("mandatory", [])
+            mandatory = manifest.mandatory_sections
             narrative = proposal.get("narrative_data") or {}
             present = [s for s in mandatory if narrative.get(s)]
             score = (len(present) / len(mandatory)) * weights["section_coverage"] if mandatory else 0.0
@@ -272,7 +338,7 @@ class DonorScoringEngine:
 
         # 2. source_citations (25) — standardized [ref: ID] / [source: X]
         def _source_citations():
-            min_ratio = rules["citations"].get("min_source_ratio", 0.75)
+            min_ratio = manifest.min_source_ratio
             paragraphs = self._paragraphs(proposal)
             ref_ids = self._reference_registry(proposal)
             has_registry = bool(ref_ids) or bool(proposal.get("reference_text"))
@@ -301,10 +367,7 @@ class DonorScoringEngine:
 
         # 3. smart_criteria (20) — regex + structural per dimension
         def _smart_criteria():
-            dims = rules["smart_indicators"].get(
-                "required_dimensions",
-                ["specific", "measurable", "achievable", "relevant", "time_bound"],
-            )
+            dims = manifest.required_dimensions
             logframe = proposal.get("logframe_data") or {}
             matrix = logframe.get("matrix", []) if isinstance(logframe, dict) else []
             indicators = [str(row.get("indicators", "")) for row in matrix if isinstance(row, dict)]
@@ -329,7 +392,7 @@ class DonorScoringEngine:
 
         # 4. donor_keywords (15)
         def _donor_keywords():
-            tokens = rules["keywords"].get("expected_tokens", [])
+            tokens = manifest.mandatory_keywords
             blob = self._narrative_blob(proposal)
             matched = sum(1 for t in tokens if t.lower() in blob)
             score = (matched / len(tokens)) * weights["donor_keywords"] if tokens else 0.0
@@ -344,19 +407,24 @@ class DonorScoringEngine:
                            + (f" Missing: {', '.join(missing)}." if missing else ""),
             }
 
-        # 5. budget_alignment (10) — dynamic cap from donor manifest
+        # 5. budget_alignment (10) — SPEC LINEAR PENALTY (canonical)
+        #    overhead <= cap -> 10.0; else max(0, 10 - (overhead - cap) * 5)
         def _budget_alignment():
-            cap = rules["budget"].get("max_overhead_percent", 7.0)
+            cap = manifest.overhead_cap_percent
             actual = proposal.get("budget_data", {}).get("overhead_percent", 0.0) if isinstance(proposal.get("budget_data"), dict) else 0.0
-            penalty = max(0.0, (float(actual) - float(cap)) / float(cap)) if cap else 0.0
-            score = weights["budget_alignment"] * (1.0 - penalty)
+            if float(actual) <= float(cap):
+                score = weights["budget_alignment"]
+                penalty = 0.0
+            else:
+                penalty = (float(actual) - float(cap)) * 5.0
+                score = max(0.0, weights["budget_alignment"] - penalty)
             return {
                 "criterion": "budget_alignment",
                 "score": round(score, 1),
                 "max_score": weights["budget_alignment"],
                 "target_step": "step5",
                 "target_field": "budget",
-                "details": f"Overhead {actual}% vs donor cap {cap}% -> penalty {penalty:.2f}.",
+                "details": f"Overhead {actual}% vs donor cap {cap}% -> linear penalty {penalty:.2f}.",
             }
 
         criteria = [
@@ -375,23 +443,23 @@ class DonorScoringEngine:
             trace.append(result)
 
         total = round(sum(t["score"] for t in trace), 1)
-        threshold = manifest.get("pass_threshold", 70)
+        threshold = manifest.pass_threshold
 
-        # Hard quota gates (NotebookLM refinement #4)
-        quota_checks = self._evaluate_quotas(manifest, proposal)
-        failed_quotas = [c for c in quota_checks if c["verifiable"] and not c["passed"]]
-        eligibility_passed = len(failed_quotas) == 0
+        # Hard eligibility gates (canonical root-level)
+        gate_checks = self._evaluate_gates(manifest, proposal)
+        failed_gates = [c for c in gate_checks if c["verifiable"] and not c["passed"]]
+        eligibility_passed = len(failed_gates) == 0
         eligibility = {
             "passed": eligibility_passed,
             "status": "ELIGIBLE" if eligibility_passed else "AUTOMATIC_REJECTION",
-            "failed_quotas": [c["quota"] for c in failed_quotas],
-            "checks": quota_checks,
+            "failed_quotas": [c["quota"] for c in failed_gates],
+            "checks": gate_checks,
         }
 
         return {
             "setup_id": proposal.get("setup_id", "setup_unknown"),
             "donor_id": donor_id,
-            "donor_name": manifest.get("name", donor_id),
+            "donor_name": manifest.display_name or donor_id,
             "total_score": total,
             "pass_threshold": threshold,
             "passed": total >= threshold and eligibility_passed,

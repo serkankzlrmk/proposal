@@ -1,19 +1,25 @@
 """
 proposal/engine/advisor_context.py — Advisor Context Builder (Pydantic models).
 
-Bridges the deterministic scoring engine and the LLM Advisor:
+Bridges the deterministic scoring engine and the LLM Advisor.
+
+ARCHITECTURAL_DECISIONS #4 (CANONICAL: SUPERSET / MERGED):
+  The rich Step B diagnostics (gate_evaluation, diagnostics,
+  available_registry) are RETAINED and merged with the Master Spec §4.1
+  patch-contract fields (step_id, field_name, current_text, donor_id,
+  rule_violation, target_criterion, suggested_action, reference_candidates).
 
   - Takes the RAW engine output (score + trace + eligibility) and the proposal
   - Produces an ACTIONABLE, token-efficient context for the Advisor LLM:
       * gate_evaluation: does the proposal have AUTOMATIC_REJECTION? (first line)
       * diagnostics: only the offending blocks with section_key + snippet
         (NOT the whole proposal text -> token cost drops ~60%)
-      * available_registry: only valid source_ids from the pipeline
+      * available_registry / reference_candidates: only valid source_ids
         (Advisor must never invent references)
   - Pydantic validation: AdvisorContext.model_validate() keeps engine and
     agent decoupled.
 
-Design principles (NotebookLM feedback):
+Design principles (Master Spec / NotebookLM feedback):
   - Advisor's job is synthesis of violations -> revision suggestions,
     NOT re-computing all rules from scratch.
   - Raw text snippets are localized to the violation site.
@@ -27,6 +33,8 @@ import re
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+
+from engine.models import DonorManifest
 
 logger = logging.getLogger(__name__)
 
@@ -76,13 +84,27 @@ class DonorContext(BaseModel):
 
 
 class AdvisorContext(BaseModel):
-    """The ONLY data the Advisor LLM sees about a proposal run."""
+    """The ONLY data the Advisor LLM sees about a proposal run.
+
+    Superset (ARCHITECTURAL_DECISIONS #4): Master Spec §4.1 single-focus
+    patch fields + retained Step B rich diagnostics.
+    """
 
     proposal_id: str
     donor_context: DonorContext
     gate_evaluation: GateEvaluation
     diagnostics: List[Diagnostic] = Field(default_factory=list)
     available_registry: List[RegistryEntry] = Field(default_factory=list)
+
+    # ── Master Spec §4.1 patch-contract fields (single-focus view) ──────
+    step_id: int = 5
+    field_name: str = ""
+    current_text: str = ""
+    donor_id: str = ""
+    rule_violation: Optional[str] = None
+    target_criterion: str = ""
+    suggested_action: str = ""
+    reference_candidates: List[RegistryEntry] = Field(default_factory=list)
 
     @property
     def is_blocked(self) -> bool:
@@ -118,17 +140,16 @@ class AdvisorContextBuilder:
         ),
     }
 
-    def __init__(self, donor_id: str, manifest: Dict[str, Any]) -> None:
+    def __init__(self, donor_id: str, manifest: DonorManifest) -> None:
         self.donor_id = donor_id
         self.manifest = manifest
 
     def build(self, engine_result: Dict[str, Any], proposal: Dict[str, Any]) -> AdvisorContext:
-        donor_rules = self.manifest.get("rules", {})
         donor_ctx = DonorContext(
             donor_id=self.donor_id,
-            min_source_ratio=donor_rules.get("citations", {}).get("min_source_ratio", 0.75),
-            budget_cap_overhead_percent=donor_rules.get("budget", {}).get("max_overhead_percent", 7.0),
-            mandatory_quotas=donor_rules.get("quota_requirements", {}),
+            min_source_ratio=self.manifest.min_source_ratio,
+            budget_cap_overhead_percent=self.manifest.overhead_cap_percent,
+            mandatory_quotas=self.manifest.hard_eligibility_gates,
         )
 
         gate = self._build_gate(engine_result)
@@ -141,7 +162,64 @@ class AdvisorContextBuilder:
             gate_evaluation=gate,
             diagnostics=diagnostics,
             available_registry=registry,
+            # Spec §4.1 single-focus view: first blocking item wins
+            step_id=self._focus_step(gate, diagnostics),
+            field_name=self._focus_field(gate, diagnostics),
+            current_text=self._focus_text(gate, diagnostics),
+            donor_id=self.donor_id,
+            rule_violation=self._focus_violation(gate, diagnostics),
+            target_criterion=self._focus_criterion(diagnostics),
+            suggested_action="Apply the suggested revision for the diagnosed issue and re-score.",
+            reference_candidates=registry,
         )
+
+    # -- focus helpers (Spec §4.1 single-focus view) ---------------------
+    @staticmethod
+    def _focus_step(gate: GateEvaluation, diagnostics: List[Diagnostic]) -> int:
+        if gate.blocking_reasons:
+            return 1  # quota fixes start at targeting/context step
+        if diagnostics:
+            key = diagnostics[0].section_key
+            if key.startswith("logframe"):
+                return 3
+            if key.startswith("budget"):
+                return 4
+            return 4  # narrative sections
+        return 5
+
+    @staticmethod
+    def _focus_field(gate: GateEvaluation, diagnostics: List[Diagnostic]) -> str:
+        if gate.blocking_reasons:
+            return gate.blocking_reasons[0].field
+        if diagnostics:
+            return diagnostics[0].section_key
+        return ""
+
+    @staticmethod
+    def _focus_text(gate: GateEvaluation, diagnostics: List[Diagnostic]) -> str:
+        if diagnostics:
+            return diagnostics[0].current_text or diagnostics[0].raw_text_snippet
+        if gate.blocking_reasons:
+            return gate.blocking_reasons[0].detail
+        return ""
+
+    @staticmethod
+    def _focus_violation(gate: GateEvaluation, diagnostics: List[Diagnostic]) -> Optional[str]:
+        if diagnostics:
+            return diagnostics[0].rule_type
+        if gate.blocking_reasons:
+            return f"QUOTA_{gate.blocking_reasons[0].field.upper()}"
+        return None
+
+    @staticmethod
+    def _focus_criterion(diagnostics: List[Diagnostic]) -> str:
+        if not diagnostics:
+            return ""
+        return {
+            "SMART_VALIDATION": "smart_criteria",
+            "CITATION_REGISTRY": "source_citations",
+            "BUDGET_CAP": "budget_alignment",
+        }.get(diagnostics[0].rule_type, "")
 
     # -- gate ------------------------------------------------------------
     def _build_gate(self, engine_result: Dict[str, Any]) -> GateEvaluation:
@@ -224,10 +302,10 @@ class AdvisorContextBuilder:
                     )
                 )
 
-        # Budget: overhead cap delta
+        # Budget: overhead cap delta (linear penalty, canonical formula)
         budget = proposal.get("budget_data") or {}
         actual_overhead = budget.get("overhead_percent", 0.0)
-        cap = self.manifest.get("rules", {}).get("budget", {}).get("max_overhead_percent", 7.0)
+        cap = self.manifest.overhead_cap_percent
         if float(actual_overhead) > float(cap):
             diags.append(
                 Diagnostic(

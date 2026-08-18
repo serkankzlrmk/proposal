@@ -1,8 +1,9 @@
 # donors/generic.yaml — Generic Institutional Donor (flexible baseline)
+# Root-level declarative manifest (canonical — Master Spec §2.2 / ARCHITECTURAL_DECISIONS #1)
 donor_id: "generic"
-name: "Generic Institutional Donor"
-version: "1.0.0"
-template: "Generic Proposal Template"
+display_name: "Generic Institutional Donor"
+template_standard: "Generic Proposal Template"
+version: "1.1.0"
 currency: "USD"
 
 scoring_weights:
@@ -12,33 +13,34 @@ scoring_weights:
   donor_keywords: 15
   budget_alignment: 10
 
-rules:
-  sections:
-    mandatory:
-      - "humanitarian_context"
-      - "needs_assessment"
-      - "strategic_justification"
-      - "logframe"
-      - "budget_breakdown"
+sections:
+  mandatory:
+    - "humanitarian_context"
+    - "needs_assessment"
+    - "strategic_justification"
+    - "logframe"
+    - "budget_breakdown"
 
-  citations:
-    min_source_ratio: 0.50  # Flexible baseline
+max_char_limits:
+  humanitarian_context: 4000
+  needs_assessment: 4000
+  strategic_justification: 4000
+  logframe: 2000
+  budget_breakdown: 2000
 
-  smart_indicators:
-    required_dimensions: [specific, measurable, achievable, relevant, time_bound]
+min_source_ratio: 0.50        # Flexible baseline
+overhead_cap_percent: 7.0
 
-  keywords:
-    expected_tokens:
-      - "protection"
-      - "gender"
-      - "disability"
-      - "sustainability"
-      - "local_partner"
+mandatory_keywords:
+  - "protection"
+  - "gender"
+  - "disability"
+  - "sustainability"
+  - "local partner"
 
-  budget:
-    max_overhead_percent: 7.0
-    required_categories: [personnel, operational, overhead]
+smart_indicators:
+  required_dimensions: [specific, measurable, achievable, relevant, time_bound]
 
-  quota_requirements: {}
+hard_eligibility_gates: {}
 
 pass_threshold: 70

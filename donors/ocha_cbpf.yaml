@@ -1,10 +1,9 @@
 # donors/ocha_cbpf.yaml — UN OCHA Country-Based Pooled Funds (CBPF)
-# Template: GPPi 8+3 Harmonized Proposal
-# Source: proposal/engine/donor_rules.py (existing rules, migrated to YAML)
+# Root-level declarative manifest (canonical — Master Spec §2.2 / ARCHITECTURAL_DECISIONS #1)
 donor_id: "ocha_cbpf"
-name: "UN OCHA Country-Based Pooled Funds (CBPF)"
-version: "1.0.0"
-template: "GPPi 8+3 Harmonized Proposal"
+display_name: "UN OCHA Country-Based Pooled Funds (CBPF)"
+template_standard: "GPPi 8+3 Harmonized"
+version: "1.1.0"
 currency: "USD"
 
 scoring_weights:
@@ -14,42 +13,39 @@ scoring_weights:
   donor_keywords: 15
   budget_alignment: 10
 
-rules:
-  sections:
-    mandatory:
-      - "project_summary"
-      - "humanitarian_situation"
-      - "needs_assessment"
-      - "beneficiaries"
-      - "justification"
-    limits:
-      project_summary: {max_chars: 4000}
-      humanitarian_situation: {max_chars: 4000}
-      needs_assessment: {max_chars: 4000}
-      beneficiaries: {max_chars: 4000}
-      justification: {max_chars: 4000}
+# Mandatory narrative sections (presence-gated; keys align with generator/UI)
+sections:
+  mandatory:
+    - "project_summary"
+    - "humanitarian_situation"
+    - "needs_assessment"
+    - "beneficiaries"
+    - "justification"
 
-  citations:
-    min_source_ratio: 0.75  # Heavy SitRep + HRP citation requirements
+max_char_limits:
+  project_summary: 4000
+  humanitarian_situation: 4000
+  needs_assessment: 4000
+  beneficiaries: 4000
+  justification: 4000
 
-  smart_indicators:
-    required_dimensions: [specific, measurable, achievable, relevant, time_bound]
+min_source_ratio: 0.75        # Heavy SitRep + HRP citation requirements
+overhead_cap_percent: 7.0     # GPPi indirect cost ceiling
 
-  keywords:
-    expected_tokens:
-      - "sadd"
-      - "disaggregated"
-      - "protection"
-      - "gender"
-      - "cluster coordination"
+mandatory_keywords:
+  - "sadd"
+  - "gbv"
+  - "psea"
+  - "cluster coordination"
+  - "humanitarian principles"
+  - "sphere standards"
 
-  budget:
-    max_overhead_percent: 7.0
-    required_categories: [personnel, operational, overhead]
-    max_file_size_mb: 4.86
+smart_indicators:
+  required_dimensions: [specific, measurable, achievable, relevant, time_bound]
 
-  quota_requirements:
-    sadd_disaggregation: true
-    cluster_coordination_mandatory: true
+hard_eligibility_gates:
+  sadd_disaggregation_mandatory: true
+  cluster_coordination_mandatory: true
+  psea_policy_mandatory: true
 
 pass_threshold: 70
