@@ -171,6 +171,39 @@ def test_verify_gates_keeps_evidenced():
     assert verify_gates_against_text(gates, echo_text) == gates
 
 
+# ── Evidence bridge (Sightline, no code move) ─────────────────────────────
+def test_evidence_bridge_zero_crash_when_sightline_missing(monkeypatch):
+    """Bridge must never break the pipeline when Sightline is absent."""
+    import engine.evidence as ev
+
+    monkeypatch.setattr(ev, "SIGHTLINE_ROOT", Path("/nonexistent/sightline"))
+    monkeypatch.setattr(ev, "_loaded", False)
+    monkeypatch.setattr(ev, "_available", False)
+    assert ev.available() is False
+    assert ev.search_sitreps(country="Turkey") is None
+    assert ev.collect_evidence("Turkey") == {"source": "unavailable"}
+    assert ev.evidence_to_prompt({"source": "unavailable"}) == ""
+
+
+def test_evidence_prompt_rendering():
+    """Evidence block renders only non-empty sources with citation hint."""
+    from engine.evidence import evidence_to_prompt
+
+    ev = {
+        "source": "sightline_bridge",
+        "sitreps": "UNICEF SitRep: 1.2M children affected",
+        "hdx_overview": None,
+        "refugees": "",
+        "idps": "320K IDPs registered",
+    }
+    prompt = evidence_to_prompt(ev, max_chars=200)
+    assert "EVIDENCE FROM LIVE SOURCES" in prompt
+    assert "UNICEF SitRep" in prompt
+    assert "320K IDPs" in prompt
+    assert "HDX Country Overview" not in prompt  # empty source skipped
+    assert "[ref: SIGHTLINE_<SOURCE>]" in prompt
+
+
 # ── API contract (ingest -> review -> publish) ───────────────────────────
 @pytest.fixture
 def client():

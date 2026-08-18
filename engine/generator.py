@@ -5,7 +5,7 @@ proposal/engine/generator.py — AI Generator for Theory of Change, Logframe Mat
 import json
 import logging
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import httpx
 
 try:
@@ -18,6 +18,45 @@ except ImportError:
     from proposal.ops.tracing import log_llm_call
 
 logger = logging.getLogger(__name__)
+
+
+# ── Country helpers for the evidence bridge ────────────────────────────────
+_COUNTRY_CODES = {
+    "turkey": "TUR", "türkiye": "TUR", "syria": "SYR", "sudan": "SDN",
+    "somalia": "SOM", "yemen": "YEM", "afghanistan": "AFG", "ukraine": "UKR",
+    "ethiopia": "ETH", "nigeria": "NGA", "myanmar": "MMR", "bangladesh": "BGD",
+    "jordan": "JOR", "lebanon": "LBN", "iraq": "IRQ", "pakistan": "PAK",
+    "palestine": "PSE", "gaza": "PSE", "congo": "COD", "dr congo": "COD",
+    "south sudan": "SSD", "chad": "TCD", "niger": "NER", "mali": "MLI",
+    "burkina faso": "BFA", "mozambique": "MOZ", "haiti": "HTI", "venezuela": "VEN",
+    "colombia": "COL", "peru": "PER", "ecuador": "ECU", "libya": "LBY",
+    "iran": "IRN", "georgia": "GEO", "armenia": "ARM", "azerbaijan": "AZE",
+}
+
+
+def _ascii_country(country: str) -> str:
+    """Normalize a country label to ASCII for ReliefWeb queries."""
+    if not country:
+        return ""
+    s = country.lower()
+    for tr, en in (("türkiye", "turkey"), ("ç", "c"), ("ğ", "g"), ("ı", "i"),
+                   ("ö", "o"), ("ş", "s"), ("ü", "u")):
+        s = s.replace(tr, en)
+    # Take the first meaningful token (e.g. "Sudan (Darfur)" -> "Sudan")
+    s = s.split("(")[0].strip()
+    return s.title()
+
+
+def _country_code_for(country: str) -> Optional[str]:
+    """Map a country label to an ISO-3 code for HDX queries (best-effort)."""
+    if not country:
+        return None
+    s = country.lower()
+    for tr, en in (("türkiye", "turkey"), ("ç", "c"), ("ğ", "g"), ("ı", "i"),
+                   ("ö", "o"), ("ş", "s"), ("ü", "u")):
+        s = s.replace(tr, en)
+    s = s.split("(")[0].strip()
+    return _COUNTRY_CODES.get(s)
 
 
 # ── Donor manifest context (call-aware generation) ────────────────────────
@@ -438,6 +477,21 @@ def generate_narrative_sections(logframe_data: Dict[str, Any], context_data: Dic
     else:
         plan = [{"key": s["key"], "title": s["title"], "max_chars": s["max_chars"]} for s in profile["sections"]]
 
+    # ── Live evidence (Sightline bridge — ReliefWeb/HDX, no code move) ─────
+    evidence_block = ""
+    try:
+        from engine.evidence import collect_evidence, evidence_to_prompt
+
+        country_code = _country_code_for(context_data.get("country", ""))
+        ev = collect_evidence(
+            country=_ascii_country(context_data.get("country", "")),
+            theme=theme,
+            country_code=country_code,
+        )
+        evidence_block = evidence_to_prompt(ev, max_chars=2500)
+    except Exception as e:
+        logger.debug("Evidence collection skipped: %s", e)
+
     sections = {}
     for sec in plan:
         key = sec["key"]
@@ -452,6 +506,11 @@ def generate_narrative_sections(logframe_data: Dict[str, Any], context_data: Dic
 
         DONOR REQUIREMENTS (from the call manifest — write to satisfy these):
         {donor_reqs}
+
+        {evidence_block}
+
+        When you use a fact from the evidence, cite it inline as [ref: SIGHTLINE_<SOURCE>]
+        (e.g. [ref: SIGHTLINE_SITREPS]). Do NOT invent citations.
 
         Write direct, high-impact donor text. Return ONLY the section narrative.
         """
