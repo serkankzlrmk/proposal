@@ -18,12 +18,14 @@ try:
     from blueprints.proposal_api import proposal_api_bp
     from blueprints.step3_logframe import step3_api_bp
     from blueprints.step4_budget_risk import step4_api_bp
+    from blueprints.call_ingest_api import call_ingest_bp
     from db import init_db
 except ImportError:
     from proposal.config import HOST, PORT, DEBUG, SECRET_KEY, BASE_DIR
     from proposal.blueprints.proposal_api import proposal_api_bp
     from proposal.blueprints.step3_logframe import step3_api_bp
     from proposal.blueprints.step4_budget_risk import step4_api_bp
+    from proposal.blueprints.call_ingest_api import call_ingest_bp
     from proposal.db import init_db
 
 logging.basicConfig(
@@ -45,6 +47,7 @@ CORS(app)
 app.register_blueprint(proposal_api_bp)
 app.register_blueprint(step3_api_bp)
 app.register_blueprint(step4_api_bp)
+app.register_blueprint(call_ingest_bp)
 
 
 @app.route("/")

@@ -27,3 +27,6 @@ output/*.pdf
 .idea/
 .vscode/
 *.swp
+
+# Ingested donor call test artifacts
+donors/ech_sudan_2026.yaml

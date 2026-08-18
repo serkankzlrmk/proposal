@@ -54,6 +54,7 @@ class DonorManifest(BaseModel):
     smart_indicators: Dict[str, Any] = Field(default_factory=dict)  # {"required_dimensions": [...]}
     hard_eligibility_gates: Dict[str, Any] = Field(default_factory=dict)
     pass_threshold: float = 70.0
+    meta: Optional[Dict[str, Any]] = Field(default=None, exclude=True)  # call_ingest provenance
 
     # -- semantic helpers ------------------------------------------------
     @property
