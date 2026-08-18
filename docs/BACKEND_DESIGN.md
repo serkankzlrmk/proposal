@@ -127,6 +127,7 @@ erDiagram
     PROPOSALS ||--o{ PROPOSAL_SNAPSHOTS : "has"
     PROPOSALS ||--o{ AGENT_EVENTS : "generates"
     DATA_SOURCE_CALLS ||--o{ PROPOSALS : "references"
+    CALLS ||--o{ PROPOSALS : "proposal targets"
 
     PROPOSALS {
         TEXT id PK
@@ -134,6 +135,7 @@ erDiagram
         TEXT title
         TEXT country
         TEXT donor
+        TEXT call_id FK
         TEXT theme
         TEXT status
         INTEGER step
@@ -185,12 +187,34 @@ erDiagram
         INTEGER cached
         REAL created_at
     }
+    CALLS {
+        TEXT id PK
+        TEXT user_id
+        TEXT donor_name
+        TEXT donor_key
+        TEXT source_type
+        TEXT source_ref
+        TEXT deadline
+        REAL max_budget
+        TEXT currency
+        TEXT sections_json
+        TEXT quotas_json
+        TEXT special_requirements_json
+        TEXT scoring_matrix_json
+        TEXT raw_summary
+        REAL confidence
+        TEXT status
+        REAL created_at
+        REAL updated_at
+    }
 ```
 
 **Yeni tabloların amacı:**
 - `proposal_snapshots` — her aksiyon öncesi durum → geri alma (undo), karşılaştırma
 - `agent_events` — ops panelinin DB görünümü (JSONL trace'in sorgulanabilir hali)
 - `data_source_calls` — hangi kaynak kaç istek, cache hit oranı, gecikme
+- `calls` — yüklenen başvuru çağrıları; kural seti, confidence, kaynak. Proposal
+  `call_id` ile bağlanır (bu proposal hangi çağrıya gidiyor her zaman bilinir)
 
 > Not: `usage.jsonl` **dosya olarak kalıcı ledger**'dır (Waku kuralı — tokens
 > ground truth, silinmez). DB'deki `agent_events` sorgulanabilirlik içindir,
@@ -376,3 +400,159 @@ tests/fixtures/    örnek proposal JSON'ları, LLM yanıtları, Typst şablonlar
 | 6 | snapshot + agent_events tabloları (migrasyon) | Hayır — additive |
 | 7 | tasks/jobs.py (uzun işler 202'ye) | Küçük — API yanıt şekli |
 | 8 | T_max=3 döngüsü verifier'da | Evet — davranış, testlerle |
+
+---
+
+## 13. Call (Başvuru Çağrısı) Ingestion — Agentic Kural Motoru
+
+> **Bu bölüm sistemin "agentic" çekirdeğidir.** Kullanıcı bir donör çağrısı
+> (Call for Proposals / Call for Applications) dokümanı yükler; agent onu
+> analiz eder, gereksinimleri çıkarır ve **donör kurallarını dinamik olarak
+> revize eder**. Statik `donor_rules.py` profilleri artık yalnızca başlangıç
+> noktasıdır; gerçek kural seti yüklenen call'dan gelir.
+
+### 13.1 Neden (WHY)
+
+NotebookLM araştırmasındaki 34 kaynağın ana teması: her donör çağrısı kendi
+karakter limitlerini, bölüm yapısını, kota şartlarını, dosya formatını ve
+özel gereksinimlerini getirir. OCHA CBPF çağrısı GPPi 8+3 isterken, USAID BHA
+çağrısı EAG formatı + %50 yerinden edilmiş kota + ToC şartı ister. EU PRAG'ın
+puanlama matrisi, deadline, bütçe tavanı her yıl değişir.
+
+Statik profil tablosu bu çeşitliliği yakalayamaz. Çözüm: **call'ı yükle,
+agent çıkarsın, kural seti o call'a özgü olsun.**
+
+### 13.2 Akış
+
+```mermaid
+flowchart TD
+    A[Kullanıcı call dokümanı yükler] --> B{Format?}
+    B -->|PDF / DOCX| C[Ingest: text çıkarma - pdf/ocr katmanı]
+    B -->|URL| D[Fetch + temizle]
+    B -->|Yapıştırılan metin| E[Doğrudan kullan]
+    C --> F[Agent Analizi - LLM]
+    D --> F
+    E --> F
+    F --> G[CallProfile çıkarımı]
+    G --> H{Doğrulama / Onay}
+    H -->|Kullanıcı onaylar| I[DynamicDonorRules oluştur]
+    H -->|Belirsiz alan| J[Kullanıcıya soru - interaktif]
+    J --> G
+    I --> K[Pipeline bu kurallarla çalışır]
+    K --> L[Verifier da bu kurallarla denetler]
+```
+
+### 13.3 CallProfile — Çıkarılan Yapı
+
+```python
+class CallProfile(BaseModel):
+    """Agent'ın call dokümanından çıkardığı yapılandırılmış kural seti."""
+    id: str
+    donor_name: str                 # "UN OCHA CBPF - Sudan 2026 Round"
+    donor_key: str                  # varsa mevcut profille eşleşir (OCHA_CBPF)
+    source_type: str                # pdf | url | text
+    source_ref: str                 # dosya adı / URL
+    deadline: datetime | None
+    max_budget: float | None        # bütçe tavanı (USD)
+    currency: str = "USD"
+    sections: list[CallSection]     # bölümler: key, title, max_chars, required
+    quotas: list[CallQuota]         # örn: min_displaced_ratio=0.5, psea=True
+    special_requirements: list[str] # "Annex 1 zorunlu", "Fotoğraf kanıtı", ...
+    scoring_matrix: list[ScoringCriterion] | None  # EU PRAG puanlama
+    raw_summary: str                # agent özeti (UI'da gösterilir)
+    confidence: float               # 0-1, belirsiz alanları gösterir
+    created_at: datetime
+```
+
+`CallSection` mevcut `donor_rules.py` section yapısıyla **birebir aynı**
+alanlara sahiptir → pipeline ve verifier için arayüz değişmez, sadece veri
+kaynağı değişir (statik profil yerine call profili).
+
+### 13.4 Dinamik Kural Motoru (services/call_rules.py)
+
+```python
+def resolve_donor_rules(proposal) -> DonorProfile:
+    """Pipeline her adımında kuralları çözer:
+    1. Proposal bir call'a bağlıysa → o call'ın DynamicDonorRules'u kullanılır
+    2. Değilse → statik donor_rules.py profili (fallback)
+    3. Call varsa ama bazı alanlar eksikse → eksik alanlar statik profilden
+       devralınır (merge), kullanıcıya 'call'dan çıkarıldı' rozeti gösterilir
+    """
+```
+
+**Kural revizyonu iki yolla olur:**
+1. **Otomatik** — agent call'dan çıkarır, kullanıcı onaylar → o proposal'a bağlanır
+2. **Manuel** — kullanıcı yüklenen kuralları UI'da düzenler (karakter limitini
+   değiştirir, bölüm ekler) → agent bunu da call profiline işler
+
+### 13.5 Call Dokümanı → Veri Kaynakları Bağlantısı
+
+Call analizi sırasında agent, **data_sources** katmanını da kullanır:
+- Ülke + kriz durumu → ReliefWeb / GDACS (call'ın bağlamı)
+- Finansman ihtiyacı → FTS (donörün bu ülkeye verdiği önceki fonlar)
+- Bütçe kıyası → WorldBank (ülke maliyet göstergeleri)
+
+Bu çağrılar `data_source_calls` tablosuna yazılır → hangi call hangi veriye
+dayandı, denetlenebilir.
+
+### 13.6 Call Kütüphanesi (Waku memory deseni)
+
+`calls` tablosu kalıcıdır — **yüklenen her call gelecekteki oturumlarda
+hatırlanır**:
+- Aynı donörün yeni call'ı geldiğinde agent önceki call profillerini bağlam
+  olarak kullanır ("geçen yılki OCHA çağrısında X idi, bu yıl şöyle")
+- `calls.donor_key` üzerinden benzer profiller önerilir
+- Proposal → `call_id` FK ile bağlanır; böylece "bu proposal hangi çağrıya
+  gidiyor" her zaman bilinir
+
+### 13.7 Frontend Tasarımı — New Proposal Akışı
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  + New Proposal                                            │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  STEP 1 — Select or Upload Call (Başvuru Çağrısı)    │  │
+│  │                                                      │  │
+│  │  [Kütüphaneden seç]  [PDF/DOCX Yükle]  [URL]  [Paste]│  │
+│  │                                                      │  │
+│  │  Yüklenen call'ın özeti:                             │  │
+│  │  ┌──────────────────────────────────────────────┐    │  │
+│  │  │ UN OCHA CBPF — Sudan 2026 Round              │    │  │
+│  │  │ Deadline: 15 Oct 2026 · Budget cap: $2M      │    │  │
+│  │  │ Bölümler: 8 (GPPi 8+3) · Karakter: 4,000/tek │    │  │
+│  │  │ Kota: %50 IDP/refugee · PSEA zorunlu          │    │  │
+│  │  │ [Kuralları incele] [Onayla ve devam et]       │    │  │
+│  │  └──────────────────────────────────────────────┘    │  │
+│  │                                                      │  │
+│  │  STEP 2 — Context & Targeting (mevcut sihirbaz)      │  │
+│  │  ...                                                 │  │
+│  └──────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────┘
+```
+
+**"Kuralları incele" paneli** (agentic gözlemlenebilirlik):
+- Her kuralın kaynağı: `call dokümanı §3.2'den çıkarıldı` / `statik profilden
+  devralındı` / `kullanıcı düzenledi`
+- Belirsiz alanlar kullanıcıya soru olarak listelenir (`confidence` düşük)
+- Onaylanan kural seti `calls` tablosuna yazılır, proposal'a bağlanır
+
+### 13.8 Ops Entegrasyonu
+
+Call ingestion da **tamamen trace'lenir** (Waku deseni):
+- `call_ingest_started`, `call_ingest_llm`, `call_parsed`, `call_approved`
+- `usage.jsonl`'a call analiz token'ları da yazılır (agent harcaması görünür)
+- Ops panelinde: "Son call analizleri" — hangi call, kaç token, kaç saniye,
+  confidence skoru
+
+### 13.9 Neden "Agentic" — Waku'nun Dört Sütunu
+
+| Waku sütunu | Bu sistemde karşılığı |
+|---|---|
+| **Harness** | Flask + blueprint'ler + services orchestrator |
+| **Loop** | Call → analiz → onay → pipeline → verifier döngüsü |
+| **Memory** | `calls` tablosu + snapshot'lar (oturumlar arası hatırlama) |
+| **Eval / LLM-Ops** | trace + usage ledger + gate (verifier) + confidence skoru |
+
+Her sistem tasarımında bu dört sütun olmalıdır — proposal da istisna değil.
+Call ingestion bunu uçtan uca örnekler: sistem sadece "üretmez", **öğrenir,
+hatırlar, kendini denetler**.
