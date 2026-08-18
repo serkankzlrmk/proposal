@@ -572,6 +572,61 @@
     if (subtab === 'budget') renderStep4Budget();
   }
 
+  // ── Landing view: existing proposals (view/delete) ──────────────────────
+  async function renderLanding() {
+    document.getElementById('landingView').style.display = 'block';
+    document.getElementById('workspace').style.display = 'none';
+    const listEl = document.getElementById('landingProposalsList');
+    try {
+      const res = await api('/api/proposals');
+      const props = res.proposals || [];
+      if (!props.length) {
+        listEl.innerHTML = `
+          <div class="glass-card" style="text-align:center; padding:40px 20px;">
+            <div style="font-size:15px; font-weight:600; color:var(--text); margin-bottom:6px;">No proposals yet</div>
+            <div style="font-size:12.5px; color:var(--text-secondary); margin-bottom:16px;">Start by ingesting a donor call or using a ready donor framework.</div>
+            <button class="btn btn-primary" id="btnEmptyNew">+ New Proposal</button>
+          </div>`;
+        document.getElementById('btnEmptyNew').addEventListener('click', createNewProposal);
+        return;
+      }
+      listEl.innerHTML = props.map(p => {
+        const donor = esc(p.donor || '—');
+        const step = p.step || 1;
+        const updated = p.updated_at ? new Date(p.updated_at * 1000).toLocaleDateString() : '—';
+        return `
+          <div class="glass-card" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding:14px 16px;">
+            <div style="flex:1; cursor:pointer;" data-open="${esc(p.id)}">
+              <div style="font-size:13.5px; font-weight:600; color:var(--text);">${esc(p.title || 'Untitled')}</div>
+              <div style="font-size:11.5px; color:var(--text-secondary); margin-top:3px;">
+                ${donor} • Step ${step}/6 • ${esc(p.country || '—')} • updated ${updated}
+              </div>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <button class="btn btn-sm btn-primary" data-open="${esc(p.id)}">Open</button>
+              <button class="btn btn-sm" data-del="${esc(p.id)}" style="color:var(--red);">Delete</button>
+            </div>
+          </div>`;
+      }).join('');
+      listEl.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => openProposalFromLanding(b.dataset.open)));
+      listEl.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+        if (!confirm('Delete this proposal permanently?')) return;
+        try {
+          await api(`/api/proposals/${b.dataset.del}`, { method: 'DELETE' });
+          renderLanding();
+        } catch (e) { alert(`Delete failed: ${e.message}`); }
+      }));
+    } catch (e) {
+      listEl.innerHTML = `<div style="color:var(--red); font-size:13px;">Failed to load proposals: ${esc(e.message)}</div>`;
+    }
+  }
+
+  async function openProposalFromLanding(pid) {
+    document.getElementById('landingView').style.display = 'none';
+    document.getElementById('workspace').style.display = 'block';
+    await loadProposal(pid);
+  }
+
   // ── Step 6: Donor Call Ingestion ────────────────────────────────────────
   async function handleIngestCall() {
     const files = el.callFileInput.files;
@@ -1254,6 +1309,7 @@
       if (e.target.value) loadProposal(e.target.value);
     });
     el.btnNewProposal.addEventListener('click', createNewProposal);
+    document.getElementById('btnLandingNew').addEventListener('click', createNewProposal);
 
     // Advisor
     el.btnSendAdvisor.addEventListener('click', sendAdvisorMessage);
@@ -1266,7 +1322,8 @@
   async function init() {
     setupEventListeners();
     await loadDonors();
-    await loadProposalsList();
+    // Landing view first: existing proposals (view/delete) + New CTA
+    await renderLanding();
   }
 
   document.addEventListener('DOMContentLoaded', init);

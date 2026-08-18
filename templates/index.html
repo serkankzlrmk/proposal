@@ -31,8 +31,24 @@
     </div>
   </header>
 
+  <!-- Landing View: existing proposals (view/delete) + New Proposal CTA -->
+  <main class="main-layout" id="landingView" style="display:block;">
+    <section class="workspace-pane" style="max-width: 900px; margin: 0 auto; width: 100%;">
+      <div class="step-header-area" style="margin-bottom: 16px;">
+        <div>
+          <h2 class="step-title">Proposals</h2>
+          <p class="step-subtitle">Pick an existing proposal to continue, or start a new one from a donor call.</p>
+        </div>
+        <button id="btnLandingNew" class="btn btn-primary">+ New Proposal</button>
+      </div>
+      <div id="landingProposalsList">
+        <div style="color:var(--text-secondary); font-size:13px;">Loading proposals...</div>
+      </div>
+    </section>
+  </main>
+
   <!-- Main Split Layout -->
-  <main class="main-layout" id="workspace">
+  <main class="main-layout" id="workspace" style="display:none;">
 
     <!-- Left Workspace (65%) -->
     <section class="workspace-pane">
