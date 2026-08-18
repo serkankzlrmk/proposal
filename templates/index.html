@@ -212,6 +212,15 @@
 
           <!-- Verifier Scorecard -->
           <div id="verifierScorecard" class="verifier-card">
+            <!-- AUTOMATIC_REJECTION Global Banner (hybrid callout model) -->
+            <div id="eligibilityBanner" class="eligibility-banner" style="display: none;">
+              <div class="eligibility-banner-icon">🛑</div>
+              <div>
+                <div class="eligibility-banner-title">AUTOMATIC DONOR REJECTION RISK</div>
+                <div id="eligibilityBannerText" class="eligibility-banner-text">Proposal fails mandatory eligibility quotas.</div>
+              </div>
+            </div>
+
             <div id="scoreBanner" class="score-banner pass">
               <div>
                 <div class="score-label">AUTOMATED DONOR COMPLIANCE VERIFICATION</div>
@@ -219,6 +228,16 @@
               </div>
               <div id="verifierScoreVal" class="score-num">94/100</div>
             </div>
+
+            <!-- Eligibility Gates Checklist (above score table) -->
+            <div id="eligibilityChecklist" class="eligibility-checklist" style="display: none;">
+              <h3 style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 10px;">Eligibility Gates</h3>
+              <div id="eligibilityGatesList"><!-- Rendered dynamically --></div>
+            </div>
+
+            <!-- Interactive Score Breakdown Table (click row -> jump to editor field) -->
+            <h3 style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 10px;">Score Breakdown <span style="font-weight:400; color:var(--text-secondary);">(click a row to jump to the field)</span></h3>
+            <div id="scoreTableContainer"><!-- Rendered dynamically --></div>
 
             <h3 style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 10px;">Audit Findings & Recommendations</h3>
             <div id="verifierIssuesList">

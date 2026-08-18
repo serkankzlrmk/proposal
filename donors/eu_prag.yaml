@@ -30,7 +30,7 @@ rules:
       sustainability_visibility: {max_chars: 3500}
 
   citations:
-    min_source_ratio: 0.75
+    min_source_ratio: 0.80  # High academic and baseline study citation density
 
   smart_indicators:
     required_dimensions: [specific, measurable, achievable, relevant, time_bound]

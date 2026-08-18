@@ -30,7 +30,7 @@ rules:
       justification: {max_chars: 4000}
 
   citations:
-    min_source_ratio: 0.75
+    min_source_ratio: 0.75  # Heavy SitRep + HRP citation requirements
 
   smart_indicators:
     required_dimensions: [specific, measurable, achievable, relevant, time_bound]

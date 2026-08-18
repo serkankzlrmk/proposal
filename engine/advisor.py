@@ -1,5 +1,11 @@
 """
 proposal/engine/advisor.py — Interactive AI Proposal Advisor & Patch Generator.
+
+v2: Advisor now consumes a token-efficient AdvisorContext (built from the
+deterministic scoring engine's trace), NOT the raw proposal dump.
+  - Gate status shapes strategy: AUTOMATIC_REJECTION -> fix quotas first.
+  - Diagnostics carry only violating blocks (section_key + snippet).
+  - Registry is passed so the LLM never invents references.
 """
 
 import json
@@ -12,39 +18,62 @@ try:
 except ImportError:
     from proposal.config import OPENROUTER_API_KEY, LLM_BASE_URL, LLM_MODEL
 
+try:
+    from engine.advisor_context import AdvisorContext, build_advisor_system_prompt
+except ImportError:
+    from proposal.engine.advisor_context import AdvisorContext, build_advisor_system_prompt
+
 logger = logging.getLogger(__name__)
 
 
-def advisor_chat(proposal: Dict[str, Any], user_message: str, chat_history: List[Dict[str, str]] = None) -> Dict[str, Any]:
-    """Provide interactive conversational advice with actionable proposal patches."""
+def advisor_chat(
+    proposal: Dict[str, Any],
+    user_message: str,
+    chat_history: List[Dict[str, str]] = None,
+    advisor_ctx: AdvisorContext = None,
+) -> Dict[str, Any]:
+    """Provide interactive conversational advice with actionable proposal patches.
+
+    advisor_ctx: optional pre-built AdvisorContext (from /analyze). When absent,
+    the function degrades gracefully to a deterministic response.
+    """
     donor = proposal.get("donor", "OCHA_CBPF")
     country = proposal.get("country", "Target Region")
     title = proposal.get("title", "Proposal")
     logframe = proposal.get("logframe_data") or {}
     narrative = proposal.get("narrative_data") or {}
 
-    system_prompt = (
-        f"You are an expert Senior Project Design Advisor assisting a proposal writer for a {donor} grant in {country}.\n"
-        "Provide constructive, precise feedback based on Sphere standards, IASC protection rules, and donor expectations.\n"
-        "If you recommend a specific improvement to a Logframe cell or narrative section, include a structured patch block in this JSON format at the very end of your reply:\n"
-        "```json\n"
-        "{\n"
-        '  "action": "update_logframe",\n'
-        '  "row_index": 1,\n'
-        '  "field": "indicators",\n'
-        '  "suggested_value": ">= 85% of target households access >= 15L water/person/day."\n'
-        "}\n"
-        "```"
-    )
+    # System prompt: context-aware when AdvisorContext provided
+    if advisor_ctx is not None:
+        base_system = build_advisor_system_prompt(advisor_ctx)
+    else:
+        base_system = (
+            f"You are an expert Senior Project Design Advisor assisting a proposal writer for a {donor} grant in {country}.\n"
+            "Provide constructive, precise feedback based on Sphere standards, IASC protection rules, and donor expectations.\n"
+            "If you recommend a specific improvement to a Logframe cell or narrative section, include a structured patch block in this JSON format at the very end of your reply:\n"
+            "```json\n"
+            "{\n"
+            '  "action": "update_logframe",\n'
+            '  "row_index": 1,\n'
+            '  "field": "indicators",\n'
+            '  "suggested_value": ">= 85% of target households access >= 15L water/person/day."\n'
+            "}\n"
+            "```"
+        )
 
     if OPENROUTER_API_KEY:
-        messages = [{"role": "system", "content": system_prompt}]
+        messages = [{"role": "system", "content": base_system}]
         if chat_history:
             for m in chat_history[-6:]:
                 messages.append({"role": m.get("role", "user"), "content": m.get("content", "")})
+        # Compact context injection: localized snippets, not full proposal
+        if advisor_ctx is not None:
+            context_payload = advisor_ctx.model_dump_json()
+        else:
+            context_payload = f"Logframe: {json.dumps(logframe.get('matrix', []))}"
         messages.append({
             "role": "user",
-            "content": f"Current Proposal State:\nLogframe: {json.dumps(logframe.get('matrix', []))}\nUser Question: {user_message}",
+            "content": f"Advisor Context:\n{context_payload}\n\nUser Question: {user_message}",
         })
 
         headers = {
@@ -79,6 +108,18 @@ def advisor_chat(proposal: Dict[str, Any], user_message: str, chat_history: List
             logger.warning("Advisor LLM call failed: %s", e)
 
     # Deterministic helpful response with interactive patch example
+    if advisor_ctx is not None and advisor_ctx.is_blocked:
+        blocking = advisor_ctx.gate_evaluation.blocking_reasons
+        first = blocking[0] if blocking else None
+        message = (
+            f"Regarding your project **'{title}'** for **{donor}**:\n\n"
+            f"⚠️ **This proposal is currently BLOCKED** — {len(blocking)} hard gate issue(s).\n\n"
+            f"Top blocker: **{first.field if first else 'quota'}** — {first.detail if first else ''}\n\n"
+            "I recommend fixing the quota/eligibility issue BEFORE polishing text, "
+            "otherwise the proposal faces desk rejection regardless of narrative quality."
+        )
+        return {"message": message, "patch": None}
+
     return {
         "message": (
             f"Regarding your project **'{title}'** for **{donor}**:\n\n"

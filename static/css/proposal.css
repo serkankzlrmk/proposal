@@ -640,3 +640,76 @@ body {
   .workspace-pane { flex: 1; }
   .advisor-pane { flex: 0 0 320px; border-left: none; border-top: 1px solid var(--border); }
 }
+
+/* ── Eligibility Banner (AUTOMATIC_REJECTION) ─────────────────────────── */
+.eligibility-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: linear-gradient(135deg, #7f1d1d, #991b1b);
+  border: 1px solid #dc2626;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  color: #fecaca;
+}
+.eligibility-banner-icon { font-size: 18px; line-height: 1.3; }
+.eligibility-banner-title {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.4px;
+  color: #fff; text-transform: uppercase;
+}
+.eligibility-banner-text { font-size: 12.5px; color: #fecaca; margin-top: 2px; }
+
+/* ── Eligibility Gates Checklist ──────────────────────────────────────── */
+.eligibility-checklist {
+  background: var(--surface, rgba(255,255,255,0.04));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.gate-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 0; font-size: 12.5px;
+  border-bottom: 1px dashed var(--border);
+}
+.gate-item:last-child { border-bottom: none; }
+.gate-badge {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.4px;
+  padding: 2px 8px; border-radius: 10px; text-transform: uppercase;
+  white-space: nowrap;
+}
+.gate-badge.pass { background: rgba(30,158,79,0.15); color: #1e9e4f; }
+.gate-badge.hard-fail { background: rgba(220,38,38,0.15); color: #dc2626; }
+.gate-badge.unverified { background: rgba(245,158,11,0.15); color: #f59e0b; }
+.gate-name { font-weight: 600; color: var(--text); }
+.gate-detail { color: var(--text-secondary); font-size: 11.5px; margin-left: auto; text-align: right; }
+.gate-fix-btn {
+  background: none; border: 1px solid var(--border); color: var(--text-secondary);
+  font-size: 11px; padding: 3px 8px; border-radius: 6px; cursor: pointer;
+  white-space: nowrap; transition: all 0.15s;
+}
+.gate-fix-btn:hover { border-color: var(--primary, #3b82f6); color: var(--primary, #3b82f6); }
+
+/* ── Interactive Score Breakdown Table ────────────────────────────────── */
+.score-table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+.score-table th {
+  text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.4px;
+  color: var(--text-secondary); text-transform: uppercase;
+  padding: 6px 8px; border-bottom: 1px solid var(--border);
+}
+.score-table td { padding: 8px; font-size: 12.5px; border-bottom: 1px solid var(--border); }
+.score-row { cursor: pointer; transition: background 0.15s; }
+.score-row:hover { background: rgba(59,130,246,0.06); }
+.score-row:last-child td { border-bottom: none; }
+.score-criterion { font-weight: 600; color: var(--text); }
+.score-bar-track {
+  height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px;
+  overflow: hidden; min-width: 120px;
+}
+.score-bar-fill { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+.score-bar-fill.ok { background: #1e9e4f; }
+.score-bar-fill.warn { background: #f59e0b; }
+.score-bar-fill.bad { background: #dc2626; }
+.score-num-cell { font-weight: 700; color: var(--text); white-space: nowrap; }
+.score-jump-hint { color: var(--text-tertiary); font-size: 10.5px; }

@@ -1,0 +1,44 @@
+# donors/generic.yaml — Generic Institutional Donor (flexible baseline)
+donor_id: "generic"
+name: "Generic Institutional Donor"
+version: "1.0.0"
+template: "Generic Proposal Template"
+currency: "USD"
+
+scoring_weights:
+  section_coverage: 30
+  source_citations: 25
+  smart_criteria: 20
+  donor_keywords: 15
+  budget_alignment: 10
+
+rules:
+  sections:
+    mandatory:
+      - "humanitarian_context"
+      - "needs_assessment"
+      - "strategic_justification"
+      - "logframe"
+      - "budget_breakdown"
+
+  citations:
+    min_source_ratio: 0.50  # Flexible baseline
+
+  smart_indicators:
+    required_dimensions: [specific, measurable, achievable, relevant, time_bound]
+
+  keywords:
+    expected_tokens:
+      - "protection"
+      - "gender"
+      - "disability"
+      - "sustainability"
+      - "local_partner"
+
+  budget:
+    max_overhead_percent: 7.0
+    required_categories: [personnel, operational, overhead]
+
+  quota_requirements: {}
+
+pass_threshold: 70

@@ -61,6 +61,11 @@
     verifierSummaryText: document.getElementById('verifierSummaryText'),
     verifierScoreVal: document.getElementById('verifierScoreVal'),
     verifierIssuesList: document.getElementById('verifierIssuesList'),
+    eligibilityBanner: document.getElementById('eligibilityBanner'),
+    eligibilityBannerText: document.getElementById('eligibilityBannerText'),
+    eligibilityChecklist: document.getElementById('eligibilityChecklist'),
+    eligibilityGatesList: document.getElementById('eligibilityGatesList'),
+    scoreTableContainer: document.getElementById('scoreTableContainer'),
     // Advisor Elements
     advisorMessages: document.getElementById('advisorMessages'),
     advisorInput: document.getElementById('advisorInput'),
@@ -346,23 +351,186 @@
           ✓ All donor constraints, character limits, and vulnerable population quotas satisfied.
         </div>
       `;
-      return;
+    } else {
+      let html = '';
+      issues.forEach(iss => {
+        const crit = iss.severity === 'critical';
+        html += `
+          <div class="issue-item ${crit ? 'critical' : ''}">
+            <div class="issue-tag">
+              ${crit ? 'CRITICAL COMPLIANCE ISSUE' : 'RECOMMENDED REFINEMENT'} • ${esc(iss.rule || 'rule')}
+            </div>
+            <div class="issue-msg">${esc(iss.message || iss.description || '')}</div>
+            ${iss.recommendation ? `<div class="issue-rec"><em>Recommendation:</em> ${esc(iss.recommendation)}</div>` : ''}
+          </div>
+        `;
+      });
+      el.verifierIssuesList.innerHTML = html;
+    }
+  }
+
+  // ── Donor Score Analysis (NotebookLM hybrid callout model) ────────────────
+  async function runScoreAnalysis() {
+    if (!state.activeProposalId) return;
+    await saveCurrentState();
+    try {
+      const res = await api(`/api/proposals/${state.activeProposalId}/analyze`, { method: 'POST' });
+      renderAnalysis(res);
+      return res;
+    } catch (e) {
+      console.error('Score analysis failed:', e);
+      el.scoreTableContainer.innerHTML = `<div style="color:var(--red); font-size:12.5px;">Analysis failed: ${esc(e.message)}</div>`;
+      return null;
+    }
+  }
+
+  function renderAnalysis(analysis) {
+    // 1) Global AUTOMATIC_REJECTION banner
+    const elig = analysis.eligibility || {};
+    const blocked = elig.status === 'AUTOMATIC_REJECTION';
+    el.eligibilityBanner.style.display = blocked ? 'flex' : 'none';
+    if (blocked) {
+      const failed = (elig.failed_quotas || []).join(', ');
+      el.eligibilityBannerText.textContent = `Proposal fails mandatory eligibility quotas: ${failed}. Fix these before submission.`;
     }
 
-    let html = '';
-    issues.forEach(iss => {
-      const crit = iss.severity === 'critical';
-      html += `
-        <div class="issue-item ${crit ? 'critical' : ''}">
-          <div class="issue-tag">
-            ${crit ? 'CRITICAL COMPLIANCE ISSUE' : 'RECOMMENDED REFINEMENT'} • ${esc(iss.rule || 'rule')}
+    // 2) Eligibility Gates checklist
+    const checks = elig.checks || [];
+    el.eligibilityChecklist.style.display = checks.length ? 'block' : 'none';
+    if (checks.length) {
+      el.eligibilityGatesList.innerHTML = checks.map(c => {
+        let badge, label;
+        if (!c.verifiable) { badge = 'unverified'; label = 'UNVERIFIED'; }
+        else if (c.passed) { badge = 'pass'; label = 'PASS'; }
+        else { badge = 'hard-fail'; label = 'HARD FAIL'; }
+        return `
+          <div class="gate-item">
+            <span class="gate-badge ${badge}">${label}</span>
+            <span class="gate-name">${esc(c.quota || '')}</span>
+            <span class="gate-detail">${esc(c.details || '')}</span>
+            ${badge === 'hard-fail'
+              ? `<button class="gate-fix-btn" data-quota="${esc(c.quota || '')}">Ask Advisor to fix</button>`
+              : ''}
           </div>
-          <div class="issue-msg">${esc(iss.message || iss.description || '')}</div>
-          ${iss.recommendation ? `<div class="issue-rec"><em>Recommendation:</em> ${esc(iss.recommendation)}</div>` : ''}
-        </div>
+        `;
+      }).join('');
+      // Advisor remediation trigger on hard-fail badges
+      el.eligibilityGatesList.querySelectorAll('.gate-fix-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const quota = btn.dataset.quota || '';
+          const msg = `Fix the failed eligibility quota "${quota}" in this proposal. Suggest concrete content changes.`;
+          el.advisorInput.value = msg;
+          setStep(5);
+          sendAdvisorMessage();
+        });
+      });
+    }
+
+    // 3) Interactive Score Breakdown Table
+    const trace = analysis.trace || [];
+    if (trace.length) {
+      el.scoreTableContainer.innerHTML = `
+        <table class="score-table">
+          <thead>
+            <tr><th>Criterion</th><th style="width:40%;">Score</th><th>Points</th><th></th></tr>
+          </thead>
+          <tbody>
+            ${trace.map(t => {
+              const pct = t.max_score ? (t.score / t.max_score) * 100 : 0;
+              const barCls = pct >= 80 ? 'ok' : (pct >= 50 ? 'warn' : 'bad');
+              return `
+                <tr class="score-row" data-step="${esc(t.target_step || '')}" data-field="${esc(t.target_field || '')}"
+                    data-criterion="${esc(t.criterion || '')}" title="${esc(t.details || '')}">
+                  <td class="score-criterion">${esc(t.criterion || '')}</td>
+                  <td>
+                    <div class="score-bar-track"><div class="score-bar-fill ${barCls}" style="width:${pct}%"></div></div>
+                  </td>
+                  <td class="score-num-cell">${Number(t.score).toFixed(1)} / ${t.max_score}</td>
+                  <td class="score-jump-hint">click to jump &rarr;</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
       `;
-    });
-    el.verifierIssuesList.innerHTML = html;
+
+      // Row click -> jump to editor field
+      el.scoreTableContainer.querySelectorAll('.score-row').forEach(row => {
+        row.addEventListener('click', () => {
+          const step = parseInt(row.dataset.step.replace(/\D/g, ''), 10) || 2;
+          const field = row.dataset.field;
+          jumpToField(step, field);
+        });
+      });
+    } else {
+      el.scoreTableContainer.innerHTML = '<div style="color:var(--text-secondary); font-size:12.5px;">No score data available.</div>';
+    }
+
+    // 4) Reflect score in main banner
+    if (typeof analysis.total_score === 'number') {
+      el.verifierScoreVal.textContent = `${analysis.total_score.toFixed(1)}/100`;
+      el.scoreBanner.className = `score-banner ${analysis.passed ? 'pass' : 'fail'}`;
+      el.verifierSummaryText.textContent = blocked
+        ? 'Proposal is BLOCKED by mandatory eligibility quotas.'
+        : (analysis.passed ? 'Proposal passes donor compliance threshold.' : `Score below threshold (${analysis.pass_threshold}).`);
+    }
+  }
+
+  // ── Jump-to-editor DOM navigation (target_step / target_field) ─────────────
+  function jumpToField(step, field) {
+    if (!step || step < 1 || step > 5) step = 2;
+    setStep(step);
+
+    setTimeout(() => {
+      let targetEl = null;
+      const map = {
+        1: {
+          title: 'inputTitle', country: 'inputCountry', humanitarian_situation: 'inputHumSit',
+          needs_assessment: 'inputNeeds', beneficiaries: 'inputBeneficiariesTotal',
+          project_summary: 'inputTitle', strategic_justification: 'inputNeeds',
+        },
+        3: { logframe: 'logframeBody' },
+        4: { budget: 'narrativeSectionInput' },
+      };
+      // Trace target_step is a pipeline stage, not a UI step. Map stage names
+      // to the correct UI step for narrative/section fields.
+      if (['humanitarian_situation', 'needs_assessment', 'project_summary',
+           'executive_summary', 'beneficiaries', 'beneficiary_targeting',
+           'justification', 'strategic_justification', 'context_relevance',
+           'program_rationale', 'risk_management', 'sustainability_exit',
+           'methodology', 'capacity', 'cost_effectiveness',
+           'sustainability_visibility', 'title', 'country'].includes(field)) {
+        step = 1;
+      }
+      const id = (map[step] || {})[field] || (step === 2 ? 'inputTitle' : '');
+      if (id) targetEl = document.getElementById(id);
+      if (!targetEl && field && ['project_summary', 'executive_summary',
+           'humanitarian_situation', 'needs_assessment', 'beneficiaries',
+           'beneficiary_targeting', 'justification', 'strategic_justification',
+           'risk_management', 'sustainability_exit', 'methodology', 'capacity',
+           'cost_effectiveness', 'sustainability_visibility'].includes(field)) {
+        // narrative field -> Step 4 tab
+        step = 4;
+        targetEl = document.getElementById('narrativeSectionInput');
+      }
+      if (!targetEl && step === 4) {
+        // narrative: find matching section tab
+        const tabs = el.narrativeTabsHeader?.querySelectorAll('button');
+        if (tabs) {
+          for (const t of tabs) {
+            if (t.dataset.tab === field) { t.click(); break; }
+          }
+        }
+        targetEl = document.getElementById('narrativeSectionInput');
+      }
+      if (targetEl) {
+        targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        targetEl.style.outline = '2px solid var(--primary, #3b82f6)';
+        targetEl.style.outlineOffset = '2px';
+        targetEl.focus({ preventScroll: true });
+        setTimeout(() => { targetEl.style.outline = ''; }, 2500);
+      }
+    }, 100);
   }
 
   // ── Advisor Drawer & Patch Applicator ─────────────────────────────────────
@@ -489,6 +657,10 @@
     el.btnRunVerifier.textContent = 'Auditing Compliance...';
     try {
       await saveCurrentState();
+      // Deterministic donor score analysis (YAML rules engine)
+      const analysis = await api(`/api/proposals/${state.activeProposalId}/analyze`, { method: 'POST' });
+      renderAnalysis(analysis);
+      // LLM blind verifier (semantic layer)
       const res = await api(`/api/proposals/${state.activeProposalId}/verify`, { method: 'POST' });
       state.proposal = res.proposal;
       renderVerifier();

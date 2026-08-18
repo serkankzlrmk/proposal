@@ -30,7 +30,7 @@ rules:
       sustainability_exit: {max_chars: 4000}
 
   citations:
-    min_source_ratio: 0.75
+    min_source_ratio: 0.60  # Emergency concept notes permit lower initial citation density
 
   smart_indicators:
     required_dimensions: [specific, measurable, achievable, relevant, time_bound]
