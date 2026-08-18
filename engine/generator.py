@@ -21,42 +21,22 @@ logger = logging.getLogger(__name__)
 
 
 # ── Country helpers for the evidence bridge ────────────────────────────────
-_COUNTRY_CODES = {
-    "turkey": "TUR", "türkiye": "TUR", "syria": "SYR", "sudan": "SDN",
-    "somalia": "SOM", "yemen": "YEM", "afghanistan": "AFG", "ukraine": "UKR",
-    "ethiopia": "ETH", "nigeria": "NGA", "myanmar": "MMR", "bangladesh": "BGD",
-    "jordan": "JOR", "lebanon": "LBN", "iraq": "IRQ", "pakistan": "PAK",
-    "palestine": "PSE", "gaza": "PSE", "congo": "COD", "dr congo": "COD",
-    "south sudan": "SSD", "chad": "TCD", "niger": "NER", "mali": "MLI",
-    "burkina faso": "BFA", "mozambique": "MOZ", "haiti": "HTI", "venezuela": "VEN",
-    "colombia": "COL", "peru": "PER", "ecuador": "ECU", "libya": "LBY",
-    "iran": "IRN", "georgia": "GEO", "armenia": "ARM", "azerbaijan": "AZE",
-}
-
-
 def _ascii_country(country: str) -> str:
     """Normalize a country label to ASCII for ReliefWeb queries."""
-    if not country:
-        return ""
-    s = country.lower()
-    for tr, en in (("türkiye", "turkey"), ("ç", "c"), ("ğ", "g"), ("ı", "i"),
-                   ("ö", "o"), ("ş", "s"), ("ü", "u")):
-        s = s.replace(tr, en)
-    # Take the first meaningful token (e.g. "Sudan (Darfur)" -> "Sudan")
-    s = s.split("(")[0].strip()
-    return s.title()
+    try:
+        from engine.evidence import ascii_country
+        return ascii_country(country)
+    except Exception:
+        return (country or "").split("(")[0].strip().title()
 
 
 def _country_code_for(country: str) -> Optional[str]:
     """Map a country label to an ISO-3 code for HDX queries (best-effort)."""
-    if not country:
+    try:
+        from engine.evidence import country_code_for
+        return country_code_for(country)
+    except Exception:
         return None
-    s = country.lower()
-    for tr, en in (("türkiye", "turkey"), ("ç", "c"), ("ğ", "g"), ("ı", "i"),
-                   ("ö", "o"), ("ş", "s"), ("ü", "u")):
-        s = s.replace(tr, en)
-    s = s.split("(")[0].strip()
-    return _COUNTRY_CODES.get(s)
 
 
 # ── Donor manifest context (call-aware generation) ────────────────────────

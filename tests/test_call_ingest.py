@@ -204,6 +204,28 @@ def test_evidence_prompt_rendering():
     assert "[ref: SIGHTLINE_<SOURCE>]" in prompt
 
 
+def test_evidence_to_references_registry_entries():
+    """Evidence converts to citation registry entries (SIGHTLINE_* ids)."""
+    from engine.evidence import evidence_to_references
+
+    ev = {
+        "source": "sightline_bridge",
+        "sitreps": "UNICEF SitRep data",
+        "hdx_overview": None,
+        "refugees": "1.2M refugees",
+        "idps": "",
+    }
+    refs = evidence_to_references(ev, country="Türkiye")
+    ids = [r["id"] for r in refs]
+    assert "SIGHTLINE_SITREPS" in ids
+    assert "SIGHTLINE_REFUGEES" in ids
+    assert "SIGHTLINE_IDPS" not in ids  # empty source skipped
+    assert "SIGHTLINE_HDX_OVERVIEW" not in ids
+    assert all(r["source"] == "sightline_bridge" for r in refs)
+    # Unavailable bridge -> no refs
+    assert evidence_to_references({"source": "unavailable"}) == []
+
+
 # ── API contract (ingest -> review -> publish) ───────────────────────────
 @pytest.fixture
 def client():

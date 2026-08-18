@@ -192,7 +192,13 @@ def handle_generate_logframe(proposal_id: str):
 
 @proposal_api_bp.route("/<proposal_id>/generate-narrative", methods=["POST"])
 def handle_generate_narrative(proposal_id: str):
-    """Trigger AI narrative drafting."""
+    """Trigger AI narrative drafting.
+
+    Before drafting, live evidence (Sightline bridge: ReliefWeb/HDX) is
+    collected and registered into proposal.references[] as SIGHTLINE_* ids —
+    so the LLM can cite [ref: SIGHTLINE_<SOURCE>] and the scoring engine
+    grounds those citations (source_citations criterion).
+    """
     prop = get_proposal(proposal_id)
     if not prop:
         return jsonify({"error": "Proposal not found"}), 404
@@ -200,6 +206,32 @@ def handle_generate_narrative(proposal_id: str):
     ctx = prop.get("context_data") or {}
     logframe = prop.get("logframe_data") or {}
     donor = prop.get("donor", "OCHA_CBPF")
+
+    # ── Evidence -> citation registry (Sightline bridge, no code move) ─────
+    try:
+        from engine.evidence import (
+            collect_evidence,
+            evidence_to_references,
+            ascii_country,
+            country_code_for,
+        )
+
+        country = ctx.get("country", "")
+        ev = collect_evidence(
+            country=ascii_country(country),
+            theme=ctx.get("theme", ""),
+            country_code=country_code_for(country),
+        )
+        new_refs = evidence_to_references(ev, country=country)
+        if new_refs:
+            registry = prop.get("references") or []
+            seen = {str(r.get("id", "")).upper() for r in registry if isinstance(r, dict)}
+            added = [r for r in new_refs if r["id"].upper() not in seen]
+            if added:
+                update_proposal(proposal_id, {"references": registry + added})
+                logger.info("Registered %d evidence references (SIGHTLINE bridge)", len(added))
+    except Exception as e:
+        logger.warning("Evidence registration skipped: %s", e)
 
     narrative_data = generate_narrative_sections(logframe, ctx, donor=donor)
     updated = update_proposal(proposal_id, {"narrative_data": narrative_data, "step": 4})

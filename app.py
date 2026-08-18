@@ -65,4 +65,7 @@ def health():
 if __name__ == "__main__":
     init_db()
     logger.info("Starting Proposal Design Pipeline on http://%s:%d", HOST, PORT)
-    app.run(host=HOST, port=PORT, debug=DEBUG)
+    # use_reloader=False: the Sightline evidence bridge adds Sightline's root
+    # to sys.path — the debug reloader watches it and restarts the server on
+    # unrelated Sightline file changes, dropping in-flight requests.
+    app.run(host=HOST, port=PORT, debug=DEBUG, use_reloader=False)

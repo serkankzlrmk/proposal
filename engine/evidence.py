@@ -34,6 +34,43 @@ SIGHTLINE_ROOT = Path(
     __import__("os").getenv("SIGHTLINE_ROOT", "~/Documents/reliefweb/RedAgent")
 ).expanduser()
 
+# ── Country helpers (shared by generator + blueprint) ─────────────────────
+_COUNTRY_CODES = {
+    "turkey": "TUR", "türkiye": "TUR", "syria": "SYR", "sudan": "SDN",
+    "somalia": "SOM", "yemen": "YEM", "afghanistan": "AFG", "ukraine": "UKR",
+    "ethiopia": "ETH", "nigeria": "NGA", "myanmar": "MMR", "bangladesh": "BGD",
+    "jordan": "JOR", "lebanon": "LBN", "iraq": "IRQ", "pakistan": "PAK",
+    "palestine": "PSE", "gaza": "PSE", "congo": "COD", "dr congo": "COD",
+    "south sudan": "SSD", "chad": "TCD", "niger": "NER", "mali": "MLI",
+    "burkina faso": "BFA", "mozambique": "MOZ", "haiti": "HTI", "venezuela": "VEN",
+    "colombia": "COL", "peru": "PER", "ecuador": "ECU", "libya": "LBY",
+    "iran": "IRN", "georgia": "GEO", "armenia": "ARM", "azerbaijan": "AZE",
+}
+
+
+def ascii_country(country: str) -> str:
+    """Normalize a country label to ASCII for ReliefWeb queries."""
+    if not country:
+        return ""
+    s = country.lower()
+    for tr, en in (("türkiye", "turkey"), ("ç", "c"), ("ğ", "g"), ("ı", "i"),
+                   ("ö", "o"), ("ş", "s"), ("ü", "u")):
+        s = s.replace(tr, en)
+    s = s.split("(")[0].strip()
+    return s.title()
+
+
+def country_code_for(country: str) -> Optional[str]:
+    """Map a country label to an ISO-3 code for HDX queries (best-effort)."""
+    if not country:
+        return None
+    s = country.lower()
+    for tr, en in (("türkiye", "turkey"), ("ç", "c"), ("ğ", "g"), ("ı", "i"),
+                   ("ö", "o"), ("ş", "s"), ("ü", "u")):
+        s = s.replace(tr, en)
+    s = s.split("(")[0].strip()
+    return _COUNTRY_CODES.get(s)
+
 _loaded = False
 _available = False
 
@@ -201,3 +238,29 @@ def evidence_to_prompt(evidence: Dict[str, Any], max_chars: int = 4000) -> str:
         "EVIDENCE FROM LIVE SOURCES (cite with [ref: SIGHTLINE_<SOURCE>] when you use them):\n"
         + "\n\n".join(blocks)
     )
+
+
+def evidence_to_references(evidence: Dict[str, Any], country: str = "") -> List[Dict[str, Any]]:
+    """Convert collected evidence into citation registry entries.
+
+    Each non-empty source becomes a reference entry with a canonical
+    SIGHTLINE_<SOURCE> id so the scoring engine can ground [ref: ...] cites.
+    """
+    if not evidence or evidence.get("source") != "sightline_bridge":
+        return []
+    refs: List[Dict[str, Any]] = []
+    for key, title in (
+        ("sitreps", "ReliefWeb Situation Reports"),
+        ("hdx_overview", "HDX Country Overview"),
+        ("refugees", "HDX Refugee Data"),
+        ("idps", "HDX IDP Data"),
+    ):
+        val = evidence.get(key)
+        if val and str(val).strip():
+            refs.append({
+                "id": f"SIGHTLINE_{key.upper()}",
+                "title": f"{title} — {country or 'target country'}",
+                "url": "",
+                "source": "sightline_bridge",
+            })
+    return refs
