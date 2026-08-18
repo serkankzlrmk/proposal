@@ -30,6 +30,7 @@
       3: document.getElementById('stepContainer3'),
       4: document.getElementById('stepContainer4'),
       5: document.getElementById('stepContainer5'),
+      6: document.getElementById('stepContainer6'),
     },
     // Step 1 Inputs
     inputTitle: document.getElementById('inputTitle'),
@@ -75,6 +76,13 @@
     advisorMessages: document.getElementById('advisorMessages'),
     advisorInput: document.getElementById('advisorInput'),
     btnSendAdvisor: document.getElementById('btnSendAdvisor'),
+    // Step 6: Donor Call Ingestion
+    callFileInput: document.getElementById('callFileInput'),
+    callIdInput: document.getElementById('callIdInput'),
+    callNameInput: document.getElementById('callNameInput'),
+    btnIngestCall: document.getElementById('btnIngestCall'),
+    callIngestResult: document.getElementById('callIngestResult'),
+    callDraftsList: document.getElementById('callDraftsList'),
   };
 
   // ── Helper: Fetch API wrapper ─────────────────────────────────────────────
@@ -154,6 +162,7 @@
       switchStep4Subtab(state.step4Subtab || 'narrative');
     }
     if (state.currentStep === 5) renderVerifier();
+    if (state.currentStep === 6) loadCallDrafts();
 
     triggerAutosave();
   }
@@ -561,6 +570,106 @@
     el.step4BudgetPane.style.display = subtab === 'budget' ? 'block' : 'none';
     if (subtab === 'risk') renderStep4Risk();
     if (subtab === 'budget') renderStep4Budget();
+  }
+
+  // ── Step 6: Donor Call Ingestion ────────────────────────────────────────
+  async function handleIngestCall() {
+    const file = el.callFileInput.files[0];
+    if (!file) { alert('Select a donor call PDF first.'); return; }
+    const callId = el.callIdInput.value.trim() || `call_${Date.now().toString(36)}`;
+    const displayName = el.callNameInput.value.trim() || callId;
+
+    el.btnIngestCall.disabled = true;
+    el.btnIngestCall.textContent = 'Extracting requirements...';
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('call_id', callId);
+      fd.append('display_name', displayName);
+      const res = await fetch('/api/calls/ingest', { method: 'POST', body: fd });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+      renderCallIngestResult(body);
+      loadCallDrafts();
+    } catch (e) {
+      alert(`Ingest failed: ${e.message}`);
+    } finally {
+      el.btnIngestCall.disabled = false;
+      el.btnIngestCall.textContent = 'Ingest Call & Extract Requirements';
+    }
+  }
+
+  function renderCallIngestResult(body) {
+    const m = body.manifest_draft || {};
+    const gates = Object.entries(m.hard_eligibility_gates || {})
+      .map(([k, v]) => `<span class="gate-badge pass">${esc(k)}</span>`).join(' ') || '<span class="gate-badge unverified">none</span>';
+    el.callIngestResult.style.display = 'block';
+    el.callIngestResult.innerHTML = `
+      <div class="glass-card">
+        <div class="step-header-area" style="margin-bottom: 8px;">
+          <div>
+            <h3 style="font-size: 13px; font-weight: 600; color: var(--text);">Extraction Result — <span class="gate-badge pass">REVIEW</span></h3>
+            <p style="font-size: 12px; color: var(--text-secondary);">${esc(body.summary || '')}</p>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-sm btn-primary" id="btnPublishDraft">Publish Manifest</button>
+            <button class="btn btn-sm" id="btnRejectDraft">Reject</button>
+          </div>
+        </div>
+        <div style="font-size: 12px; line-height: 1.9;">
+          <div><strong>Deadline:</strong> ${esc(body.deadline || 'unknown')} &nbsp;|&nbsp; <strong>Currency:</strong> ${esc(m.currency || 'USD')} &nbsp;|&nbsp; <strong>Budget max:</strong> ${m.budget_max ? m.budget_max.toLocaleString() : '—'} &nbsp;|&nbsp; <strong>Duration:</strong> ${m.max_duration_months || '—'} mo</div>
+          <div><strong>Hard gates:</strong> ${gates}</div>
+          <div><strong>Keywords:</strong> ${(m.mandatory_keywords || []).map(k => esc(k)).join(', ') || '—'}</div>
+          <div><strong>Sections (${(m.sections?.mandatory || []).length}):</strong> ${(m.sections?.mandatory || []).slice(0, 8).map(s => esc(s)).join(', ')}${(m.sections?.mandatory || []).length > 8 ? '…' : ''}</div>
+        </div>
+      </div>
+    `;
+    document.getElementById('btnPublishDraft').addEventListener('click', () => publishDraft(body.draft_id));
+    document.getElementById('btnRejectDraft').addEventListener('click', () => rejectDraft(body.draft_id));
+  }
+
+  async function publishDraft(draftId) {
+    try {
+      const res = await api(`/api/calls/drafts/${draftId}/publish`, { method: 'POST' });
+      alert(`Manifest published: ${res.donor_id}\nEngine now scores against it.`);
+      loadCallDrafts();
+    } catch (e) { alert(`Publish failed: ${e.message}`); }
+  }
+
+  async function rejectDraft(draftId) {
+    try {
+      await api(`/api/calls/drafts/${draftId}/reject`, { method: 'POST' });
+      loadCallDrafts();
+    } catch (e) { alert(`Reject failed: ${e.message}`); }
+  }
+
+  async function loadCallDrafts() {
+    try {
+      const res = await api('/api/calls/drafts');
+      const drafts = res.drafts || [];
+      if (!drafts.length) {
+        el.callDraftsList.innerHTML = '<div style="color:var(--text-secondary); font-size:12.5px;">No calls ingested yet.</div>';
+        return;
+      }
+      el.callDraftsList.innerHTML = drafts.map(d => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); font-size:12.5px;">
+          <div>
+            <strong>${esc(d.display_name)}</strong>
+            <span class="gate-badge ${d.status === 'published' ? 'pass' : (d.status === 'rejected' ? 'hard-fail' : 'unverified')}">${esc(d.status.toUpperCase())}</span>
+            <div style="color:var(--text-secondary); font-size:11px;">${esc(d.call_id)} • deadline ${esc(d.deadline || '—')}</div>
+          </div>
+          ${d.status === 'review' ? `
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-sm btn-primary" data-pub="${d.id}">Publish</button>
+              <button class="btn btn-sm" data-rej="${d.id}">Reject</button>
+            </div>` : ''}
+        </div>
+      `).join('');
+      el.callDraftsList.querySelectorAll('[data-pub]').forEach(b => b.addEventListener('click', () => publishDraft(b.dataset.pub)));
+      el.callDraftsList.querySelectorAll('[data-rej]').forEach(b => b.addEventListener('click', () => rejectDraft(b.dataset.rej)));
+    } catch (e) {
+      el.callDraftsList.innerHTML = `<div style="color:var(--red); font-size:12.5px;">Failed to load drafts: ${esc(e.message)}</div>`;
+    }
   }
 
   // ── Step 5: Verifier Audit & PDF ──────────────────────────────────────────
@@ -1074,6 +1183,9 @@
         });
       });
     }
+
+    // Step 6: Donor Call Ingestion
+    el.btnIngestCall.addEventListener('click', handleIngestCall);
 
     // Proposal Select & New
     el.proposalSelect.addEventListener('change', e => {

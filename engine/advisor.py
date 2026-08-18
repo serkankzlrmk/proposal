@@ -10,13 +10,16 @@ deterministic scoring engine's trace), NOT the raw proposal dump.
 
 import json
 import logging
+import time
 from typing import Any, Dict, List
 import httpx
 
 try:
     from config import OPENROUTER_API_KEY, LLM_BASE_URL, LLM_MODEL
+    from ops.tracing import log_llm_call
 except ImportError:
     from proposal.config import OPENROUTER_API_KEY, LLM_BASE_URL, LLM_MODEL
+    from proposal.ops.tracing import log_llm_call
 
 try:
     from engine.advisor_context import AdvisorContext, build_advisor_system_prompt
@@ -88,10 +91,20 @@ def advisor_chat(
             "messages": messages,
         }
         try:
+            t0 = time.time()
             with httpx.Client(timeout=35.0) as client:
                 resp = client.post(f"{LLM_BASE_URL}/chat/completions", headers=headers, json=payload)
                 resp.raise_for_status()
                 reply_text = resp.json()["choices"][0]["message"]["content"].strip()
+                usage = resp.json().get("usage") or {}
+                log_llm_call(
+                    action="advisor_chat",
+                    model=LLM_MODEL,
+                    prompt_chars=sum(len(m.get("content", "")) for m in messages),
+                    response_chars=len(reply_text),
+                    usage=usage,
+                    latency_ms=(time.time() - t0) * 1000.0,
+                )
                 # Parse patch if present
                 patch = None
                 if "```json" in reply_text:
@@ -106,6 +119,13 @@ def advisor_chat(
                 }
         except Exception as e:
             logger.warning("Advisor LLM call failed: %s", e)
+            log_llm_call(
+                action="advisor_chat",
+                model=LLM_MODEL,
+                prompt_chars=sum(len(m.get("content", "")) for m in messages),
+                response_chars=0,
+                error=str(e),
+            )
 
     # Deterministic helpful response with interactive patch example
     if advisor_ctx is not None and advisor_ctx.is_blocked:

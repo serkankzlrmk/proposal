@@ -31,3 +31,6 @@ output/*.pdf
 # Ingested donor call test artifacts
 donors/ech_sudan_2026.yaml
 donors/unfpa_turkiye_cefm.yaml
+
+# LLM-Ops usage ledger
+ops/usage.jsonl

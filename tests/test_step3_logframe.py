@@ -168,6 +168,23 @@ def test_validate_indicators_smart_scores():
     assert batch["dimensions"]["measurable"]["passed"] == 1
 
 
+def test_harden_indicator_text_completes_dimensions():
+    """Deterministic SMART hardening appends missing dimensions (no LLM)."""
+    from engine.smart_parser import harden_indicator_text
+
+    weak = "improve access to clean water"
+    hardened = harden_indicator_text(weak)
+    assert "by month 12" in hardened
+    assert "disaggregated by gender and age" in hardened
+    # All 6 dimensions now satisfied
+    res = smart_validation_result(hardened)
+    assert len(res["passed"]) == 6
+
+    # Already-complete indicators are left untouched
+    strong = ">= 85% households access 15L/person/day by month 12, disaggregated by gender and age"
+    assert harden_indicator_text(strong) == strong
+
+
 # ── API endpoints ────────────────────────────────────────────────────────
 def test_step3_analyze_endpoint(client):
     prop = make_prop()

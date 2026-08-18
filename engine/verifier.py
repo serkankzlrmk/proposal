@@ -4,15 +4,18 @@ proposal/engine/verifier.py — Blind Verifier Pattern (Multi-Agent LLM-as-a-Jud
 
 import json
 import logging
+import time
 from typing import Any, Dict, List
 import httpx
 
 try:
     from config import OPENROUTER_API_KEY, LLM_BASE_URL, VERIFIER_MODEL
     from engine.donor_rules import get_donor_profile, validate_character_limits
+    from ops.tracing import log_llm_call
 except ImportError:
     from proposal.config import OPENROUTER_API_KEY, LLM_BASE_URL, VERIFIER_MODEL
     from proposal.engine.donor_rules import get_donor_profile, validate_character_limits
+    from proposal.ops.tracing import log_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -96,10 +99,20 @@ def run_blind_verifier(proposal: Dict[str, Any], donor: str = "OCHA_CBPF") -> Di
             ],
         }
         try:
+            t0 = time.time()
             with httpx.Client(timeout=45.0) as client:
                 resp = client.post(f"{LLM_BASE_URL}/chat/completions", headers=headers, json=payload)
                 resp.raise_for_status()
                 raw_text = resp.json()["choices"][0]["message"]["content"].strip()
+                usage = resp.json().get("usage") or {}
+                log_llm_call(
+                    action="blind_verifier",
+                    model=VERIFIER_MODEL,
+                    prompt_chars=len(user_prompt),
+                    response_chars=len(raw_text),
+                    usage=usage,
+                    latency_ms=(time.time() - t0) * 1000.0,
+                )
                 if raw_text.startswith("```"):
                     raw_text = raw_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
                 llm_eval = json.loads(raw_text)
@@ -110,6 +123,13 @@ def run_blind_verifier(proposal: Dict[str, Any], donor: str = "OCHA_CBPF") -> Di
                 summary = llm_eval.get("summary", "Proposal evaluated successfully.")
         except Exception as e:
             logger.warning("LLM Verifier call failed: %s; using deterministic rule evaluation.", e)
+            log_llm_call(
+                action="blind_verifier",
+                model=VERIFIER_MODEL,
+                prompt_chars=len(user_prompt),
+                response_chars=0,
+                error=str(e),
+            )
             base_score = 94.0 if not issues else max(60.0, 94.0 - len(issues) * 10)
             verdict = "pass" if not any(i.get("severity") == "critical" for i in issues) else "fail"
             summary = "Automated compliance checks completed against donor benchmarks."

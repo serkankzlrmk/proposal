@@ -4,15 +4,18 @@ proposal/engine/generator.py — AI Generator for Theory of Change, Logframe Mat
 
 import json
 import logging
+import time
 from typing import Any, Dict, List
 import httpx
 
 try:
     from config import OPENROUTER_API_KEY, LLM_BASE_URL, LLM_MODEL
     from engine.donor_rules import get_donor_profile
+    from ops.tracing import log_llm_call
 except ImportError:
     from proposal.config import OPENROUTER_API_KEY, LLM_BASE_URL, LLM_MODEL
     from proposal.engine.donor_rules import get_donor_profile
+    from proposal.ops.tracing import log_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -87,8 +90,12 @@ def append_references(references: List[Dict[str, Any]], sources: List[Dict[str, 
     return registry
 
 
-def _call_llm(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> str:
-    """Call OpenRouter or LLM provider with fallback heuristics."""
+def _call_llm(prompt: str, system_prompt: str = "", temperature: float = 0.3, action: str = "generate") -> str:
+    """Call OpenRouter or LLM provider with fallback heuristics.
+
+    Every call is traced to ops/usage.jsonl (LLM-Ops ledger, Waku pattern):
+    model, tokens, estimated cost, latency. Tracing never blocks the call.
+    """
     if not OPENROUTER_API_KEY:
         logger.warning("No OPENROUTER_API_KEY found; using structured deterministic fallback generation.")
         return ""
@@ -107,14 +114,33 @@ def _call_llm(prompt: str, system_prompt: str = "", temperature: float = 0.3) ->
             {"role": "user", "content": prompt},
         ],
     }
+    t0 = time.time()
     try:
         with httpx.Client(timeout=45.0) as client:
             resp = client.post(f"{LLM_BASE_URL}/chat/completions", headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
-            return data["choices"][0]["message"]["content"].strip()
+            text = data["choices"][0]["message"]["content"].strip()
+            usage = data.get("usage") or {}
+            log_llm_call(
+                action=action,
+                model=LLM_MODEL,
+                prompt_chars=len(prompt),
+                response_chars=len(text),
+                usage=usage,
+                latency_ms=(time.time() - t0) * 1000.0,
+            )
+            return text
     except Exception as e:
         logger.warning("LLM API call failed: %s; using deterministic fallback.", e)
+        log_llm_call(
+            action=action,
+            model=LLM_MODEL,
+            prompt_chars=len(prompt),
+            response_chars=0,
+            latency_ms=(time.time() - t0) * 1000.0,
+            error=str(e),
+        )
         return ""
 
 
@@ -236,7 +262,7 @@ def generate_logframe(toc_data: Dict[str, Any], context_data: Dict[str, Any], do
             if clean.startswith("```"):
                 clean = clean.split("\n", 1)[1].rsplit("```", 1)[0].strip()
             structured = json.loads(clean)
-            return project_logframe_to_matrix(structured)
+            return project_logframe_to_matrix(structured, harden=True)
         except Exception as e:
             logger.debug("Failed to parse LLM Logframe JSON: %s", e)
 
@@ -314,14 +340,24 @@ def generate_logframe(toc_data: Dict[str, Any], context_data: Dict[str, Any], do
     return project_logframe_to_matrix(structured)
 
 
-def project_logframe_to_matrix(structured: Dict[str, Any]) -> Dict[str, Any]:
+def project_logframe_to_matrix(structured: Dict[str, Any], harden: bool = False) -> Dict[str, Any]:
     """Project a structured LogicalFramework onto the legacy flat 4x4 matrix.
 
     The returned dict carries BOTH the canonical structured fields AND a
     `matrix` projection (level/logic/indicators/mov/assumptions rows) so the
     existing wizard UI and Typst PDF pipeline keep working unchanged.
+
+    harden=True: every indicator narrative is passed through the deterministic
+    SMART hardening layer (missing dimensions get standard phrasing appended)
+    before projection — no extra LLM call.
     """
     out = dict(structured or {})
+
+    def _harden_text(s: str) -> str:
+        if not harden:
+            return s
+        from engine.smart_parser import harden_indicator_text
+        return harden_indicator_text(s)
 
     goal = str(out.get("goal", ""))
     goal_inds = out.get("goal_indicators", []) or []
@@ -329,8 +365,8 @@ def project_logframe_to_matrix(structured: Dict[str, Any]) -> Dict[str, Any]:
 
     def _ind_text(ind) -> str:
         if isinstance(ind, dict):
-            return str(ind.get("narrative", ""))
-        return str(ind)
+            return _harden_text(str(ind.get("narrative", "")))
+        return _harden_text(str(ind))
 
     rows = []
     # Goal row

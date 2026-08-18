@@ -155,3 +155,41 @@ def validate_indicators(entries: List[str]) -> Dict[str, Any]:
         "dimensions": dims,
         "score": round((passed_count / len(entries)) * 100.0, 1) if entries else 0.0,
     }
+
+
+# ── SMART hardening (deterministic indicator strengthening) ───────────────
+# LLM-generated indicators often miss a dimension (no timeframe, no
+# disaggregation). This layer completes missing dimensions with standard
+# humanitarian phrasing — no extra LLM call, fully testable. The user can
+# still edit every indicator afterwards.
+HARDENING_SUFFIXES = {
+    "time_bound": "by month 12",
+    "disaggregation": "disaggregated by gender and age",
+    "measurable": "targeting at least 50% of the target population",
+    "achievable": "against a documented baseline",
+    "relevant": "aligned with donor priorities",
+}
+
+
+def harden_indicator_text(text: str) -> str:
+    """Append standard phrasing for every missing SMART dimension.
+
+    Presence-of-format only: if a dimension's pattern already matches, it is
+    left untouched. Returns the hardened indicator string.
+    """
+    text = (text or "").strip()
+    if not text:
+        return text
+    res = smart_validation_result(text)
+    missing = [d for d in ("time_bound", "disaggregation", "measurable", "achievable", "relevant") if d in res["failed"]]
+    if not missing:
+        return text
+    parts = [text]
+    for dim in missing:
+        parts.append(HARDENING_SUFFIXES[dim])
+    return "; ".join(parts)
+
+
+def harden_indicators_list(entries: List[str]) -> List[str]:
+    """Harden a batch of indicator strings; returns hardened copies."""
+    return [harden_indicator_text(e) for e in entries]

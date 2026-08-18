@@ -93,7 +93,7 @@ def extract_requirements(text: str) -> Dict[str, Any]:
         "deadline.\n\n" + _EXTRACTION_SCHEMA_HINT +
         "\n\nCALL TEXT (truncated):\n" + (text or "")[:50_000]
     )
-    raw = _call_llm(prompt, temperature=0.1)
+    raw = _call_llm(prompt, temperature=0.1, action="call_extract")
     if raw:
         try:
             clean = raw.strip()
