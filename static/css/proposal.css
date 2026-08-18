@@ -713,3 +713,13 @@ body {
 .score-bar-fill.bad { background: #dc2626; }
 .score-num-cell { font-weight: 700; color: var(--text); white-space: nowrap; }
 .score-jump-hint { color: var(--text-tertiary); font-size: 10.5px; }
+
+/* ── Step 4: Risk Matrix severity badges ─────────────────────────────────── */
+.risk-sev {
+  display: inline-block; min-width: 26px; text-align: center;
+  padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 12px;
+}
+.risk-red { background: #fecaca; color: #b91c1c; }
+.risk-amber { background: #fde68a; color: #b45309; }
+.risk-green { background: #bbf7d0; color: #15803d; }
+.budget-overhead-banner.limit-exceeded { font-weight: 600; }

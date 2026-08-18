@@ -49,7 +49,7 @@
           <span class="step-num">3</span> 4x4 Logframe Matrix
         </button>
         <button class="step-btn" data-step="4">
-          <span class="step-num">4</span> Narrative Drafting
+          <span class="step-num">4</span> Narrative, Risk & Budget
         </button>
         <button class="step-btn" data-step="5">
           <span class="step-num">5</span> Verifier Audit & PDF
@@ -175,12 +175,12 @@
           </div>
         </div>
 
-        <!-- ── Step 4: Narrative Drafting ───────────────────────────────────── -->
+        <!-- ── Step 4: Narrative, Risk & Budget ───────────────────────────── -->
         <div id="stepContainer4" class="step-view" style="display: none;">
           <div class="step-header-area">
             <div>
-              <h2 class="step-title">Donor Narrative Drafting</h2>
-              <p class="step-subtitle">Sections formatted per donor regulations with real-time character limit validation.</p>
+              <h2 class="step-title">Narrative, Risk Matrix & Itemized Budget</h2>
+              <p class="step-subtitle">Donor narrative sections, 5x5 severity risk matrix, and budget with overhead cap checks.</p>
             </div>
             <div style="display: flex; gap: 8px;">
               <button id="btnAiGenerateNarrative" class="btn btn-primary">Draft All Sections with AI</button>
@@ -188,13 +188,26 @@
             </div>
           </div>
 
-          <div id="narrativeTabsHeader" class="narrative-tabs">
-            <!-- Section tabs rendered dynamically -->
+          <!-- Sub-tabs: Narrative | Risk Matrix | Budget -->
+          <div class="narrative-tabs" id="step4SubTabs">
+            <button class="step-btn active" data-subtab="narrative">Narrative</button>
+            <button class="step-btn" data-subtab="risk">5x5 Risk Matrix</button>
+            <button class="step-btn" data-subtab="budget">Itemized Budget</button>
           </div>
 
-          <div id="narrativeSectionsContainer">
-            <!-- Active section textarea and counter rendered dynamically -->
+          <div id="step4NarrativePane">
+            <div id="narrativeTabsHeader" class="narrative-tabs">
+              <!-- Section tabs rendered dynamically -->
+            </div>
+            <div id="narrativeSectionsContainer">
+              <!-- Active section textarea and counter rendered dynamically -->
+            </div>
           </div>
+
+          <!-- Risk Matrix Pane (rendered dynamically by JS) -->
+          <div id="step4RiskPane" style="display: none;"></div>
+          <!-- Budget Pane (rendered dynamically by JS) -->
+          <div id="step4BudgetPane" style="display: none;"></div>
         </div>
 
         <!-- ── Step 5: Verifier Audit & PDF ────────────────────────────────── -->

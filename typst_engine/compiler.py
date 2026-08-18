@@ -82,6 +82,98 @@ def render_typst_document(proposal: Dict[str, Any]) -> str:
         },
     ]
 
+    # ── Step 4 data: itemized budget + 5x5 risk matrix (render when present) ──
+    budget = proposal.get("budget_data") or {}
+    budget_items = budget.get("items") or []
+    risks = budget.get("risks") or []
+
+    budget_section = ""
+    if budget_items:
+        budget_rows = ""
+        for it in budget_items:
+            if not isinstance(it, dict):
+                continue
+            cat = escape_typst(it.get("category", ""))
+            desc = escape_typst(it.get("description", ""))
+            ut = escape_typst(it.get("unit_type", ""))
+            uc = float(it.get("unit_cost", 0) or 0)
+            cnt = float(it.get("unit_count", 0) or 0)
+            total = round(cnt * uc, 2)
+            budget_rows += f"  [{cat}], [{desc}], [{ut}], [{uc:,.0f}], [{total:,.0f}],\n"
+        overhead = budget.get("overhead_percent", 0.0)
+        cap = budget.get("overhead_cap_percent", 7.0)
+        cap_note = "within cap" if overhead <= cap else "EXCEEDS CAP: score penalty applied"
+        budget_section = f"""
+= 5. Itemized Budget & Cost-Effectiveness
+
+#table(
+  columns: (1.4fr, 3fr, 1.2fr, 1.2fr, 1.4fr),
+  fill: (col, row) => if row == 0 {{ rgb("f1f5f9") }} else {{ none }},
+  stroke: 0.5pt + rgb("e2e8f0"),
+  align: (col, row) => if col in (2, 3, 4) {{ right }} else {{ left }},
+  table.header([*Category*], [*Description*], [*Unit*], [*Unit Cost (USD)*], [*Total (USD)*]),
+{budget_rows})
+#text(8pt, fill: rgb("64748b"))[_Overhead: {overhead:.1f}% (donor cap {cap:.1f}%) — {cap_note}._]
+"""
+    else:
+        budget_section = """= 5. Activity Budget & Cost-Effectiveness
+
+#table(
+  columns: (1.5fr, 3fr, 1.2fr, 1.2fr, 1.5fr),
+  fill: (col, row) => if row == 0 { rgb("f1f5f9") } else { none },
+  stroke: 0.5pt + rgb("e2e8f0"),
+  align: (col, row) => if col in (2, 3, 4) { right } else { left },
+  table.header([*Category*], [*Budget Line Description*], [*Qty / Unit*], [*Unit Cost (USD)*], [*Total (USD)*]),
+  [Direct Program], [Critical rehabilitation and emergency supplies], [12 units], [4,500], [54,000],
+  [Direct Program], [Quality testing, monitoring kits, treatment supplies], [6 months], [2,000], [12,000],
+  [Direct Program], [Community outreach and training campaigns], [24 sessions], [350], [8,400],
+  [Personnel], [Field Technical Officers & Engineers], [6 months], [4,200], [25,200],
+  [Operational], [Monitoring, logistics, security protocol], [Lump sum], [9,500], [9,500],
+  [*TOTAL BUDGET*], [*Overall Direct & Indirect Project Cost*], [], [], [*USD 109,100*]
+)
+
+#text(8pt, fill: rgb("64748b"))[_Cost-Effectiveness Ratio: USD 5.45 per beneficiary reached. In accordance with EU PRAG and USAID BHA cost reasonableness rubrics._]
+"""
+
+    risk_section = ""
+    if risks:
+        risk_rows = ""
+        for r in risks:
+            if not isinstance(r, dict):
+                continue
+            cat = escape_typst(r.get("category", ""))
+            desc = escape_typst(r.get("description", ""))
+            lk = int(r.get("likelihood", 1) or 1)
+            im = int(r.get("impact", 1) or 1)
+            sev = lk * im
+            tag = "red" if sev >= 15 else ("amber" if sev >= 8 else "green")
+            tag_fill = {"red": "fecaca", "amber": "fde68a", "green": "bbf7d0"}[tag]
+            fill_expr = 'rgb("' + tag_fill + '")'
+            mit = escape_typst(r.get("mitigation_strategy", ""))
+            risk_rows += (
+                f"  [{cat}], [{desc}], [{lk}], [{im}], "
+                f"[#block(fill: {fill_expr}, inset: 2pt, radius: 2pt)[*{sev}*]], [{mit}],\n"
+            )
+        risk_section = f"""
+== 5x5 Risk Assessment Matrix
+
+#table(
+  columns: (1.3fr, 2.2fr, 0.8fr, 0.8fr, 0.9fr, 2.4fr),
+  fill: (col, row) => if row == 0 {{ rgb("0f172a") }} else {{ none }},
+  stroke: 0.5pt + rgb("cbd5e1"),
+  align: top + left,
+  table.header(
+    text(fill: white, weight: "bold")[Category],
+    text(fill: white, weight: "bold")[Risk Description],
+    text(fill: white, weight: "bold")[Likelihood],
+    text(fill: white, weight: "bold")[Impact],
+    text(fill: white, weight: "bold")[Severity],
+    text(fill: white, weight: "bold")[Mitigation Strategy]
+  ),
+{risk_rows})
+#text(8pt, fill: rgb("64748b"))[_Severity = Likelihood × Impact (1-25). Red ≥ 15, Amber 8-12, Green 1-6. Risks with severity ≥ 12 require a mandatory mitigation plan._]
+"""
+
     doc = f"""
 #set page(
   paper: "a4",
@@ -244,23 +336,7 @@ def render_typst_document(proposal: Dict[str, Any]) -> str:
 
 #v(8pt)
 
-= 5. Activity Budget & Cost-Effectiveness
-
-#table(
-  columns: (1.5fr, 3fr, 1.2fr, 1.2fr, 1.5fr),
-  fill: (col, row) => if row == 0 { rgb("f1f5f9") } else { none },
-  stroke: 0.5pt + rgb("e2e8f0"),
-  align: (col, row) => if col in (2, 3, 4) { right } else { left },
-  table.header([*Category*], [*Budget Line Description*], [*Qty / Unit*], [*Unit Cost (USD)*], [*Total (USD)*]),
-  [Direct Program], [Critical rehabilitation and emergency supplies], [12 units], [4,500], [54,000],
-  [Direct Program], [Quality testing, monitoring kits, treatment supplies], [6 months], [2,000], [12,000],
-  [Direct Program], [Community outreach and training campaigns], [24 sessions], [350], [8,400],
-  [Personnel], [Field Technical Officers & Engineers], [6 months], [4,200], [25,200],
-  [Operational], [Monitoring, logistics, security protocol], [Lump sum], [9,500], [9,500],
-  [*TOTAL BUDGET*], [*Overall Direct & Indirect Project Cost*], [], [], [*USD 109,100*]
-)
-
-#text(8pt, fill: rgb("64748b"))[_Cost-Effectiveness Ratio: USD 5.45 per beneficiary reached. In accordance with EU PRAG and USAID BHA cost reasonableness rubrics._]
+""" + budget_section + risk_section + """
 
 #v(8pt)
 

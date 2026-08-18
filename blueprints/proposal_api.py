@@ -315,12 +315,73 @@ def handle_advisor_chat(proposal_id: str):
     return jsonify(result)
 
 
-@proposal_api_bp.route("/<proposal_id>/export/pdf", methods=["GET"])
-def handle_export_pdf(proposal_id: str):
-    """Compile and stream publication-grade Typst PDF."""
+@proposal_api_bp.route("/<proposal_id>/full-summary", methods=["GET"])
+def get_full_summary(proposal_id: str):
+    """Global aggregation endpoint (Master Spec STEP 5 directive #1).
+
+    Returns a normalized read-only snapshot: all step data + latest
+    deterministic analysis + eligibility audit + locked steps. The UI's
+    final review view renders entirely from this payload.
+    """
     prop = get_proposal(proposal_id)
     if not prop:
         return jsonify({"error": "Proposal not found"}), 404
+
+    # Deterministic analysis (same engine as /analyze)
+    donor_key = (prop.get("donor") or "OCHA_CBPF").lower().replace("_", "")
+    alias_map = {"ochacbpf": "ocha_cbpf", "usaidbha": "usaid_bha", "euprag": "eu_prag"}
+    yaml_donor = alias_map.get(donor_key, donor_key)
+    analysis = get_rule_engine().score(yaml_donor, prop)
+
+    reviews = get_reviews(proposal_id)
+
+    return jsonify({
+        "proposal": {
+            "id": prop.get("id"),
+            "title": prop.get("title"),
+            "country": prop.get("country"),
+            "donor": prop.get("donor"),
+            "theme": prop.get("theme"),
+            "status": prop.get("status"),
+            "locked_steps": prop.get("locked_steps") or [],
+            "step": prop.get("step"),
+        },
+        "steps": {
+            "1": {"context_data": prop.get("context_data")},
+            "2": {"toc_data": prop.get("toc_data")},
+            "3": {"logframe_data": prop.get("logframe_data")},
+            "4": {"budget_data": prop.get("budget_data")},
+        },
+        "analysis": analysis,
+        "reviews": reviews,
+    })
+
+
+@proposal_api_bp.route("/<proposal_id>/export/pdf", methods=["GET"])
+def handle_export_pdf(proposal_id: str):
+    """Compile and stream publication-grade Typst PDF.
+
+    Final Verification Gate (Master Spec STEP 5 directive #2): if the
+    deterministic analysis flags AUTOMATIC_REJECTION, the PDF is refused
+    with 403 so a desk-rejected proposal cannot be compiled.
+    """
+    prop = get_proposal(proposal_id)
+    if not prop:
+        return jsonify({"error": "Proposal not found"}), 404
+
+    # Final verification gate: hard eligibility check before compile
+    donor_key = (prop.get("donor") or "OCHA_CBPF").lower().replace("_", "")
+    alias_map = {"ochacbpf": "ocha_cbpf", "usaidbha": "usaid_bha", "euprag": "eu_prag"}
+    yaml_donor = alias_map.get(donor_key, donor_key)
+    analysis = get_rule_engine().score(yaml_donor, prop)
+    elig = analysis.get("eligibility", {})
+    if elig.get("status") == "AUTOMATIC_REJECTION":
+        failed = ", ".join(elig.get("failed_quotas") or [])
+        return jsonify({
+            "error": "Proposal fails mandatory eligibility quotas; PDF compilation is locked.",
+            "code": "PDF_LOCKED_ELIGIBILITY",
+            "failed_quotas": elig.get("failed_quotas", []),
+        }), 403
 
     pdf_bytes = compile_pdf(prop)
     if not pdf_bytes:

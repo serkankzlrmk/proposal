@@ -141,6 +141,90 @@ class GanttItem(BaseModel):
     lead_role: str = ""
 
 
+# ── Step 4: Risk & Budget Architecture (Master Spec §2.1, STEP 4) ─────────
+class RiskMatrixItem(BaseModel):
+    """5x5 severity risk row: Likelihood(1-5) x Impact(1-5) = Severity(1-25)."""
+
+    risk_id: str = ""
+    category: str = "operational"  # security|safeguarding_psea|financial|operational|environmental
+    description: str = ""
+    likelihood: int = Field(default=1, ge=1, le=5)
+    impact: int = Field(default=1, ge=1, le=5)
+    mitigation_strategy: str = ""
+    residual_risk: str = "medium"  # low|medium|high
+
+    @property
+    def severity_score(self) -> int:
+        return self.likelihood * self.impact
+
+    @property
+    def severity_tag(self) -> str:
+        """Color tag per spec: Green 1-6, Amber 8-12, Red 15-25."""
+        s = self.severity_score
+        if s >= 15:
+            return "red"
+        if s >= 8:
+            return "amber"
+        return "green"
+
+
+class BudgetItem(BaseModel):
+    """Itemized budget row (Master Spec STEP 4 directive #2)."""
+
+    item_id: str = ""
+    category: str = "personnel"  # personnel|travel_transport|equipment_supplies|contractual|direct_operational|indirect_overhead
+    description: str = ""
+    unit_type: str = ""
+    unit_count: float = Field(default=0.0, ge=0)
+    unit_cost: float = Field(default=0.0, ge=0)
+    donor_share: float = Field(default=1.0, ge=0.0, le=1.0)
+
+    @property
+    def total_cost(self) -> float:
+        return round(self.unit_count * self.unit_cost * self.donor_share, 2)
+
+
+class PseaCommitments(BaseModel):
+    """Institutional commitments & PSEA compliance (STEP 4 directive #3)."""
+
+    psea_policy_attached: bool = False
+    code_of_conduct: bool = False
+    anti_terrorism_vetting: bool = False
+
+
+def compute_budget_summary(items: List[Any]) -> Dict[str, Any]:
+    """Aggregate itemized budget rows into category totals + overhead ratio.
+
+    Overhead % = indirect_costs / direct_costs * 100 (Master Spec STEP 4).
+    """
+    categories: Dict[str, float] = {}
+    direct_total = 0.0
+    overhead_total = 0.0
+    for it in items:
+        if isinstance(it, BudgetItem):
+            item = it
+            total = item.total_cost
+        elif isinstance(it, dict):
+            item = BudgetItem(**it)
+            total = item.total_cost
+        else:
+            continue
+        categories[item.category] = categories.get(item.category, 0.0) + total
+        if item.category == "indirect_overhead":
+            overhead_total += total
+        else:
+            direct_total += total
+
+    overhead_percent = round((overhead_total / direct_total) * 100.0, 2) if direct_total else 0.0
+    return {
+        "categories": categories,
+        "direct_total": round(direct_total, 2),
+        "indirect_total": round(overhead_total, 2),
+        "grand_total": round(direct_total + overhead_total, 2),
+        "overhead_percent": overhead_percent,
+    }
+
+
 def iter_indicator_entries(logframe: Dict[str, Any]) -> List[Dict[str, str]]:
     """Yield (level, indicators_text) pairs from any logframe shape.
 

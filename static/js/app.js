@@ -12,6 +12,7 @@
     proposal: null,
     donors: {},
     activeNarrativeTab: null,
+    step4Subtab: 'narrative',
     autosaveTimer: null,
     advisorHistory: [],
   };
@@ -54,6 +55,10 @@
     btnNextStep4: document.getElementById('btnNextStep4'),
     narrativeTabsHeader: document.getElementById('narrativeTabsHeader'),
     narrativeSectionsContainer: document.getElementById('narrativeSectionsContainer'),
+    step4SubTabs: document.getElementById('step4SubTabs'),
+    step4NarrativePane: document.getElementById('step4NarrativePane'),
+    step4RiskPane: document.getElementById('step4RiskPane'),
+    step4BudgetPane: document.getElementById('step4BudgetPane'),
     // Step 5 Inputs
     btnRunVerifier: document.getElementById('btnRunVerifier'),
     btnExportPdf: document.getElementById('btnExportPdf'),
@@ -144,7 +149,10 @@
 
     if (state.currentStep === 2) renderToc();
     if (state.currentStep === 3) renderLogframe();
-    if (state.currentStep === 4) renderNarrative();
+    if (state.currentStep === 4) {
+      renderNarrative();
+      switchStep4Subtab(state.step4Subtab || 'narrative');
+    }
     if (state.currentStep === 5) renderVerifier();
 
     triggerAutosave();
@@ -332,6 +340,227 @@
         triggerAutosave();
       });
     }
+  }
+
+  // ── Step 4: 5x5 Risk Matrix ────────────────────────────────────────────
+  const RISK_CATEGORIES = ['security', 'safeguarding_psea', 'financial', 'operational', 'environmental'];
+
+  function renderStep4Risk() {
+    const budget = state.proposal?.budget_data || {};
+    const risks = budget.risks || [];
+    const container = el.step4RiskPane;
+
+    let html = `
+      <div class="glass-card" style="margin-top: 12px;">
+        <div class="step-header-area" style="margin-bottom: 8px;">
+          <div>
+            <h3 style="font-size: 13px; font-weight: 600; color: var(--text);">5x5 Severity Risk Matrix</h3>
+            <p style="font-size: 11.5px; color: var(--text-secondary);">Likelihood (1-5) x Impact (1-5) = Severity. Red ≥ 15, Amber 8-12, Green 1-6. Severity ≥ 12 requires mitigation.</p>
+          </div>
+          <button class="btn btn-sm btn-primary" id="btnAddRisk">+ Add Risk</button>
+        </div>
+        <table class="logframe-table" style="font-size: 12px;">
+          <thead>
+            <tr>
+              <th style="width: 14%;">Category</th>
+              <th style="width: 26%;">Risk Description</th>
+              <th style="width: 8%;">Likelihood</th>
+              <th style="width: 8%;">Impact</th>
+              <th style="width: 8%;">Severity</th>
+              <th style="width: 30%;">Mitigation Strategy</th>
+              <th style="width: 6%;"></th>
+            </tr>
+          </thead>
+          <tbody id="riskMatrixBody">
+            ${risks.length === 0 ? `<tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-secondary);">No risks defined. Add at least Security, Safeguarding/PSEA, Financial and Operational rows.</td></tr>` : ''}
+            ${risks.map((r, i) => {
+              const sev = (parseInt(r.likelihood, 10) || 1) * (parseInt(r.impact, 10) || 1);
+              const tagCls = sev >= 15 ? 'risk-red' : (sev >= 8 ? 'risk-amber' : 'risk-green');
+              return `
+                <tr data-risk="${i}">
+                  <td>
+                    <select class="input-select risk-cat" data-idx="${i}" style="font-size: 11px;">
+                      ${RISK_CATEGORIES.map(c => `<option value="${c}" ${c === r.category ? 'selected' : ''}>${c.replace('_', ' / ')}</option>`).join('')}
+                    </select>
+                  </td>
+                  <td><textarea class="editable-cell risk-desc" data-idx="${i}" style="min-height: 40px;">${esc(r.description || '')}</textarea></td>
+                  <td><input type="number" min="1" max="5" class="input-text risk-lh" data-idx="${i}" value="${r.likelihood || 1}" style="width: 50px;"></td>
+                  <td><input type="number" min="1" max="5" class="input-text risk-im" data-idx="${i}" value="${r.impact || 1}" style="width: 50px;"></td>
+                  <td><span class="risk-sev ${tagCls}">${sev}</span></td>
+                  <td><textarea class="editable-cell risk-mit" data-idx="${i}" style="min-height: 40px;">${esc(r.mitigation_strategy || '')}</textarea></td>
+                  <td><button class="btn btn-sm risk-del" data-idx="${i}" style="color:var(--red);">✕</button></td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+    container.innerHTML = html;
+
+    // Add risk
+    const addBtn = document.getElementById('btnAddRisk');
+    if (addBtn) addBtn.addEventListener('click', () => {
+      state.proposal.budget_data = state.proposal.budget_data || {};
+      state.proposal.budget_data.risks = state.proposal.budget_data.risks || [];
+      state.proposal.budget_data.risks.push({ category: 'security', description: '', likelihood: 2, impact: 2, mitigation_strategy: '' });
+      renderStep4Risk();
+      triggerAutosave();
+    });
+
+    // Inline edits
+    container.querySelectorAll('.editable-cell, .risk-lh, .risk-im, .risk-cat').forEach(inp => {
+      const evt = inp.tagName === 'SELECT' ? 'change' : 'input';
+      inp.addEventListener(evt, e => {
+        const idx = parseInt(e.target.dataset.idx, 10);
+        const risk = state.proposal.budget_data.risks[idx];
+        if (!risk) return;
+        const cls = e.target.className;
+        if (cls.includes('risk-desc')) risk.description = e.target.value;
+        else if (cls.includes('risk-mit')) risk.mitigation_strategy = e.target.value;
+        else if (cls.includes('risk-lh')) risk.likelihood = parseInt(e.target.value, 10) || 1;
+        else if (cls.includes('risk-im')) risk.impact = parseInt(e.target.value, 10) || 1;
+        else if (cls.includes('risk-cat')) risk.category = e.target.value;
+        // live severity refresh
+        if (cls.includes('risk-lh') || cls.includes('risk-im')) {
+          const sevCell = e.target.closest('tr').querySelector('.risk-sev');
+          const sev = (parseInt(risk.likelihood, 10) || 1) * (parseInt(risk.impact, 10) || 1);
+          sevCell.textContent = sev;
+          sevCell.className = `risk-sev ${sev >= 15 ? 'risk-red' : (sev >= 8 ? 'risk-amber' : 'risk-green')}`;
+        }
+        triggerAutosave();
+      });
+    });
+
+    // Delete risk
+    container.querySelectorAll('.risk-del').forEach(btn => {
+      btn.addEventListener('click', e => {
+        const idx = parseInt(e.target.dataset.idx, 10);
+        state.proposal.budget_data.risks.splice(idx, 1);
+        renderStep4Risk();
+        triggerAutosave();
+      });
+    });
+  }
+
+  // ── Step 4: Itemized Budget ────────────────────────────────────────────
+  const BUDGET_CATEGORIES = ['personnel', 'travel_transport', 'equipment_supplies', 'contractual', 'direct_operational', 'indirect_overhead'];
+
+  function renderStep4Budget() {
+    const budget = state.proposal?.budget_data || {};
+    const items = budget.items || [];
+    const container = el.step4BudgetPane;
+
+    // Compute summary client-side (mirror of backend compute_budget_summary)
+    let direct = 0, indirect = 0;
+    const catTotals = {};
+    items.forEach(it => {
+      const total = (parseFloat(it.unit_count) || 0) * (parseFloat(it.unit_cost) || 0);
+      catTotals[it.category] = (catTotals[it.category] || 0) + total;
+      if (it.category === 'indirect_overhead') indirect += total; else direct += total;
+    });
+    const overheadPct = direct ? (indirect / direct) * 100 : 0;
+    const cap = budget.overhead_cap_percent || 7.0;
+    const overCap = overheadPct > cap;
+
+    let html = `
+      <div class="glass-card" style="margin-top: 12px;">
+        <div class="step-header-area" style="margin-bottom: 8px;">
+          <div>
+            <h3 style="font-size: 13px; font-weight: 600; color: var(--text);">Itemized Budget</h3>
+            <p style="font-size: 11.5px; color: var(--text-secondary);">Overhead % = indirect / direct × 100. Donor cap: ${cap}% (OCHA/EU 7%, USAID 10%).</p>
+          </div>
+          <button class="btn btn-sm btn-primary" id="btnAddBudgetItem">+ Add Line</button>
+        </div>
+        <div class="budget-overhead-banner ${overCap ? 'limit-exceeded' : ''}" style="padding: 8px 12px; border-radius: 4px; margin-bottom: 10px; font-size: 12px; ${overCap ? 'background: rgba(220,38,38,.12); color: var(--red);' : 'background: rgba(30,158,79,.12); color: #1e9e4f;'}">
+          Overhead: <strong>${overheadPct.toFixed(1)}%</strong> vs donor cap ${cap}% — ${overCap ? 'EXCEEDS CAP: budget_alignment penalty applied' : 'within cap'}
+        </div>
+        <table class="logframe-table" style="font-size: 12px;">
+          <thead>
+            <tr>
+              <th style="width: 15%;">Category</th>
+              <th style="width: 30%;">Description</th>
+              <th style="width: 10%;">Unit Type</th>
+              <th style="width: 9%;">Unit Count</th>
+              <th style="width: 10%;">Unit Cost (USD)</th>
+              <th style="width: 11%;">Total</th>
+              <th style="width: 6%;"></th>
+            </tr>
+          </thead>
+          <tbody id="budgetItemsBody">
+            ${items.length === 0 ? `<tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-secondary);">No budget lines defined.</td></tr>` : ''}
+            ${items.map((it, i) => {
+              const total = (parseFloat(it.unit_count) || 0) * (parseFloat(it.unit_cost) || 0);
+              return `
+                <tr data-item="${i}">
+                  <td>
+                    <select class="input-select budget-cat" data-idx="${i}" style="font-size: 11px;">
+                      ${BUDGET_CATEGORIES.map(c => `<option value="${c}" ${c === it.category ? 'selected' : ''}>${c.replace(/_/g, ' ')}</option>`).join('')}
+                    </select>
+                  </td>
+                  <td><textarea class="editable-cell budget-desc" data-idx="${i}" style="min-height: 36px;">${esc(it.description || '')}</textarea></td>
+                  <td><input type="text" class="input-text budget-ut" data-idx="${i}" value="${esc(it.unit_type || '')}" style="font-size: 11px;"></td>
+                  <td><input type="number" min="0" class="input-text budget-cnt" data-idx="${i}" value="${it.unit_count || 0}" style="width: 60px;"></td>
+                  <td><input type="number" min="0" class="input-text budget-cst" data-idx="${i}" value="${it.unit_cost || 0}" style="width: 70px;"></td>
+                  <td class="budget-total">${total.toLocaleString('en-US', {style: 'currency', currency: 'USD'})}</td>
+                  <td><button class="btn btn-sm budget-del" data-idx="${i}" style="color:var(--red);">✕</button></td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+        <div style="text-align:right; font-size: 12.5px; margin-top: 8px; color: var(--text);">
+          <strong>Grand Total: ${(direct + indirect).toLocaleString('en-US', {style: 'currency', currency: 'USD'})}</strong>
+        </div>
+      </div>
+    `;
+    container.innerHTML = html;
+
+    const addBtn = document.getElementById('btnAddBudgetItem');
+    if (addBtn) addBtn.addEventListener('click', () => {
+      state.proposal.budget_data = state.proposal.budget_data || {};
+      state.proposal.budget_data.items = state.proposal.budget_data.items || [];
+      state.proposal.budget_data.items.push({ category: 'personnel', description: '', unit_type: 'month', unit_count: 1, unit_cost: 0 });
+      renderStep4Budget();
+      triggerAutosave();
+    });
+
+    container.querySelectorAll('.editable-cell, .budget-ut, .budget-cnt, .budget-cst, .budget-cat').forEach(inp => {
+      const evt = inp.tagName === 'SELECT' ? 'change' : 'input';
+      inp.addEventListener(evt, e => {
+        const idx = parseInt(e.target.dataset.idx, 10);
+        const item = state.proposal.budget_data.items[idx];
+        if (!item) return;
+        const cls = e.target.className;
+        if (cls.includes('budget-desc')) item.description = e.target.value;
+        else if (cls.includes('budget-ut')) item.unit_type = e.target.value;
+        else if (cls.includes('budget-cnt')) item.unit_count = parseFloat(e.target.value) || 0;
+        else if (cls.includes('budget-cst')) item.unit_cost = parseFloat(e.target.value) || 0;
+        else if (cls.includes('budget-cat')) item.category = e.target.value;
+        // live total refresh
+        const totalCell = e.target.closest('tr').querySelector('.budget-total');
+        const total = (parseFloat(item.unit_count) || 0) * (parseFloat(item.unit_cost) || 0);
+        if (totalCell) totalCell.textContent = total.toLocaleString('en-US', {style: 'currency', currency: 'USD'});
+        triggerAutosave();
+      });
+    });
+
+    container.querySelectorAll('.budget-del').forEach(btn => {
+      btn.addEventListener('click', e => {
+        const idx = parseInt(e.target.dataset.idx, 10);
+        state.proposal.budget_data.items.splice(idx, 1);
+        renderStep4Budget();
+        triggerAutosave();
+      });
+    });
+  }
+
+  function switchStep4Subtab(subtab) {
+    el.step4NarrativePane.style.display = subtab === 'narrative' ? 'block' : 'none';
+    el.step4RiskPane.style.display = subtab === 'risk' ? 'block' : 'none';
+    el.step4BudgetPane.style.display = subtab === 'budget' ? 'block' : 'none';
+    if (subtab === 'risk') renderStep4Risk();
+    if (subtab === 'budget') renderStep4Budget();
   }
 
   // ── Step 5: Verifier Audit & PDF ──────────────────────────────────────────
@@ -834,6 +1063,17 @@
     el.btnAiGenerateNarrative.addEventListener('click', handleGenerateNarrative);
     el.btnRunVerifier.addEventListener('click', handleRunVerifier);
     el.btnExportPdf.addEventListener('click', handleExportPdf);
+
+    // Step 4 sub-tabs (Narrative | Risk | Budget)
+    if (el.step4SubTabs) {
+      el.step4SubTabs.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.step4Subtab = btn.dataset.subtab || 'narrative';
+          el.step4SubTabs.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+          switchStep4Subtab(state.step4Subtab);
+        });
+      });
+    }
 
     // Proposal Select & New
     el.proposalSelect.addEventListener('change', e => {
