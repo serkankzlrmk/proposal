@@ -21,6 +21,7 @@ try:
     from engine.generator import generate_toc, generate_logframe, generate_narrative_sections
     from engine.verifier import run_blind_verifier
     from engine.advisor import advisor_chat
+    from engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine, get_rule_engine
     from typst_engine.compiler import compile_pdf
 except ImportError:
     from proposal.db import (
@@ -36,6 +37,7 @@ except ImportError:
     from proposal.engine.generator import generate_toc, generate_logframe, generate_narrative_sections
     from proposal.engine.verifier import run_blind_verifier
     from proposal.engine.advisor import advisor_chat
+    from proposal.engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine, get_rule_engine
     from proposal.typst_engine.compiler import compile_pdf
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,38 @@ proposal_api_bp = Blueprint("proposal_api", __name__, url_prefix="/api/proposals
 def get_donors():
     """List available donor profiles and section constraints."""
     return jsonify({"donors": DONOR_PROFILES})
+
+
+@proposal_api_bp.route("/donors/yaml", methods=["GET"])
+def get_yaml_donors():
+    """List YAML-driven donor manifests (from /donors/*.yaml)."""
+    loader = YamlDonorRuleLoader()
+    return jsonify({"donors": loader.list_donors()})
+
+
+@proposal_api_bp.route("/<proposal_id>/analyze", methods=["POST"])
+def handle_analyze(proposal_id: str):
+    """Deterministic scoring against the active donor YAML manifest.
+
+    Returns total_score + full trace (per NotebookLM spec):
+    each criterion carries score/max_score/target_step/target_field/details.
+    """
+    prop = get_proposal(proposal_id)
+    if not prop:
+        return jsonify({"error": "Proposal not found"}), 404
+
+    donor_key = (prop.get("donor") or "OCHA_CBPF").lower().replace("_", "")
+    # Map legacy donor keys (OCHA_CBPF, USAID_BHA, EU_PRAG) to YAML ids
+    alias_map = {
+        "ochacbpf": "ocha_cbpf",
+        "usaidbha": "usaid_bha",
+        "euprag": "eu_prag",
+    }
+    yaml_donor = alias_map.get(donor_key, donor_key)
+
+    engine = get_rule_engine()
+    result = engine.score(yaml_donor, prop)
+    return jsonify(result)
 
 
 @proposal_api_bp.route("", methods=["GET"])

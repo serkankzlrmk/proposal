@@ -1,0 +1,55 @@
+# donors/eu_prag.yaml — European Union / EuropeAid (PRAG & ECHO)
+# Template: PRAG Concept & Full Application Guidelines
+# Source: proposal/engine/donor_rules.py (existing rules, migrated to YAML)
+donor_id: "eu_prag"
+name: "European Union / EuropeAid (PRAG & ECHO)"
+version: "1.0.0"
+template: "PRAG Concept & Full Application Guidelines"
+currency: "EUR / USD"
+
+scoring_weights:
+  section_coverage: 30
+  source_citations: 25
+  smart_criteria: 20
+  donor_keywords: 15
+  budget_alignment: 10
+
+rules:
+  sections:
+    mandatory:
+      - "context_relevance"
+      - "methodology"
+      - "capacity"
+      - "cost_effectiveness"
+      - "sustainability_visibility"
+    limits:
+      context_relevance: {max_chars: 4500}
+      methodology: {max_chars: 5000}
+      capacity: {max_chars: 3500}
+      cost_effectiveness: {max_chars: 4000}
+      sustainability_visibility: {max_chars: 3500}
+
+  citations:
+    min_source_ratio: 0.75
+
+  smart_indicators:
+    required_dimensions: [specific, measurable, achievable, relevant, time_bound]
+
+  keywords:
+    expected_tokens:
+      - "european union"
+      - "visibility"
+      - "co-funding"
+      - "value for money"
+      - "sustainability"
+
+  budget:
+    max_overhead_percent: 7.0
+    required_categories: [personnel, operational, overhead]
+    max_file_size_mb: 10.0
+
+  quota_requirements:
+    capacity_threshold_score: 12
+    cost_effectiveness_weighted: true
+
+pass_threshold: 70
