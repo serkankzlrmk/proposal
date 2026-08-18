@@ -34,3 +34,5 @@ donors/unfpa_turkiye_cefm.yaml
 
 # LLM-Ops usage ledger
 ops/usage.jsonl
+donors/api_test_call.yaml
+donors/multi_format_call.yaml
