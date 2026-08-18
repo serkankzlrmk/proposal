@@ -43,6 +43,11 @@ class DonorManifest(BaseModel):
     version: str = "0.0.0"
     currency: str = "USD"
 
+    # ── Call-specific constraints (ingested from donor call PDFs) ─────────
+    budget_max: Optional[float] = None        # e.g. 1500000 (TRY) — call ceiling
+    max_duration_months: Optional[int] = None  # e.g. 12 — call duration cap
+    deadline: Optional[str] = None             # e.g. "2025-05-02"
+
     scoring_weights: Dict[str, float] = Field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
     sections: Dict[str, Any] = Field(default_factory=dict)  # {"mandatory": [...], "limits": {...}}
     max_char_limits: Dict[str, int] = Field(default_factory=dict)

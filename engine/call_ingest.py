@@ -64,6 +64,9 @@ Return ONLY a JSON object:
   "summary": "2-3 sentence donor call summary",
   "requirements": ["mandatory requirement 1", ...],
   "deadline": "2026-XX-XX or 'rolling'",
+  "currency": "USD",
+  "budget_max": 1500000,
+  "max_duration_months": 12,
   "budget_cap_percent": 7.0,
   "min_source_ratio": 0.75,
   "mandatory_keywords": ["keyword", ...],
@@ -98,6 +101,11 @@ def extract_requirements(text: str) -> Dict[str, Any]:
                 clean = clean.split("\n", 1)[1].rsplit("```", 1)[0].strip()
             parsed = json.loads(clean)
             if isinstance(parsed, dict) and parsed.get("summary"):
+                # Anti-hallucination: every claimed gate must have textual
+                # evidence in the call; unverifiable gates are dropped.
+                parsed["hard_gates"] = verify_gates_against_text(
+                    parsed.get("hard_gates") or {}, text
+                )
                 return parsed
         except Exception as e:
             logger.warning("LLM extraction unparseable (%s); regex fallback", e)
@@ -151,6 +159,50 @@ def _regex_extract(text: str) -> Dict[str, Any]:
     }
 
 
+# ── Evidence-gated extraction (anti-hallucination layer) ───────────────────
+# Every gate the LLM claims must be verifiable in the call text itself.
+# A gate with no textual evidence is DROPPED — the deterministic layer
+# catches LLM hallucination so the manifest only carries what the call
+# actually requires (VISION: "the system must know the call's real asks").
+GATE_EVIDENCE_PATTERNS = {
+    "sadd_disaggregation_mandatory": re.compile(
+        r"\b(sadd|sex,?\s*age|disability disaggregat|disaggregat\w*\s+by\s+(sex|age|disability))\b", re.I
+    ),
+    "cluster_coordination_mandatory": re.compile(r"\bcluster coordination\b", re.I),
+    "psea_policy_mandatory": re.compile(
+        r"\b(psea|protection from sexual exploitation|sexual exploitation and abuse)\b", re.I
+    ),
+    "sphere_standards_mandatory": re.compile(r"\bsphere\b", re.I),
+    "min_displaced_ratio": re.compile(r"\b(idps?|refugees?|displaced|returnees?)\b", re.I),
+    "min_capacity_score": re.compile(r"\b(capacity|administrative capacity|score)\b", re.I),
+}
+
+
+def verify_gates_against_text(gates: Dict[str, Any], text: str) -> Dict[str, Any]:
+    """Keep only gates with textual evidence in the call (anti-hallucination).
+
+    Numeric gates (min_displaced_ratio, min_capacity_score) are kept when
+    their subject term appears; boolean gates require their exact evidence
+    pattern. Gates with no evidence are dropped and logged.
+    """
+    low = (text or "").lower()
+    verified: Dict[str, Any] = {}
+    for key, value in gates.items():
+        if value is None or value is False or value == "":
+            continue  # LLM said "not required" — never include
+        pattern = GATE_EVIDENCE_PATTERNS.get(key)
+        if pattern is None:
+            verified[key] = value  # unknown gate key: keep (defensive)
+            continue
+        if pattern.search(low):
+            verified[key] = value
+        else:
+            logger.warning(
+                "Gate %s dropped: no evidence in call text (LLM hallucination guard)", key
+            )
+    return verified
+
+
 # ── Manifest draft building & publishing ──────────────────────────────────
 def build_manifest_draft(call_id: str, display_name: str, extracted: Dict[str, Any]) -> Dict[str, Any]:
     """Map extracted requirements onto the canonical root-level manifest shape.
@@ -167,6 +219,14 @@ def build_manifest_draft(call_id: str, display_name: str, extracted: Dict[str, A
         except (TypeError, ValueError):
             return default
 
+    def _int(value) -> Optional[int]:
+        try:
+            if value is None or value == "":
+                return None
+            return int(float(value))
+        except (TypeError, ValueError):
+            return None
+
     def _list(value, default=None) -> List[str]:
         if isinstance(value, list):
             return [str(v) for v in value if str(v).strip()]
@@ -178,9 +238,10 @@ def build_manifest_draft(call_id: str, display_name: str, extracted: Dict[str, A
         return dict(value) if isinstance(value, dict) else dict(default or {})
 
     gates = _dict(extracted.get("hard_gates"))
-    # Drop gates the extraction marked as None/empty (e.g. LLM emitted
-    # "min_capacity_score": null) — a None gate would poison evaluation.
-    gates = {k: v for k, v in gates.items() if v is not None and v != ""}
+    # Drop gates the extraction marked as None/empty/False (e.g. LLM emitted
+    # "cluster_coordination_mandatory": false) — a false/None gate means the
+    # call does NOT require it, so it must not appear in the manifest at all.
+    gates = {k: v for k, v in gates.items() if v is not None and v is not False and v != ""}
     sections = _dict(extracted.get("sections"))
     sections.setdefault("mandatory", _list(extracted.get("mandatory_sections")))
     return {
@@ -188,7 +249,10 @@ def build_manifest_draft(call_id: str, display_name: str, extracted: Dict[str, A
         "display_name": display_name,
         "template_standard": "Custom Donor Call Manifest",
         "version": "1.0.0",
-        "currency": "USD",
+        "currency": str(extracted.get("currency") or "USD").upper(),
+        "budget_max": _f(extracted.get("budget_max"), 0.0) or None,
+        "max_duration_months": _int(extracted.get("max_duration_months")),
+        "deadline": str(extracted.get("deadline") or "").strip() or None,
         "scoring_weights": {
             "section_coverage": 30, "source_citations": 25,
             "smart_criteria": 20, "donor_keywords": 15, "budget_alignment": 10,
@@ -232,6 +296,9 @@ def _dump_yaml(manifest: DonorManifest) -> str:
         "template_standard": manifest.template_standard,
         "version": manifest.version,
         "currency": manifest.currency,
+        "budget_max": manifest.budget_max,
+        "max_duration_months": manifest.max_duration_months,
+        "deadline": manifest.deadline,
         "scoring_weights": manifest.scoring_weights,
         "sections": manifest.sections,
         "max_char_limits": manifest.max_char_limits,

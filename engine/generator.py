@@ -28,16 +28,10 @@ def _donor_manifest_context(donor: str) -> str:
     """
     try:
         from engine.yaml_rules import YamlDonorRuleLoader
+        from engine.donor_resolver import resolve_donor_id
 
-        alias_map = {"ochacbpf": "ocha_cbpf", "usaidbha": "usaid_bha", "euprag": "eu_prag"}
-        candidate = (donor or "OCHA_CBPF").lower()
-        # Resolution order: exact id first (call-ingested donors keep their
-        # underscored ids like ech_sudan_2026), then legacy alias, then
-        # underscore-stripped normalization, then loader fallback.
-        yaml_donor = alias_map.get(candidate.replace("_", ""), candidate)
         loader = YamlDonorRuleLoader()
-        if yaml_donor not in loader.list_donors() and candidate != yaml_donor:
-            yaml_donor = candidate
+        yaml_donor = resolve_donor_id(donor, loader)
         manifest = loader.load(yaml_donor)
         lines = [
             f"Donor: {manifest.display_name}",
@@ -46,6 +40,14 @@ def _donor_manifest_context(donor: str) -> str:
             f"Min source citation ratio: {manifest.min_source_ratio}",
             f"Overhead cap: {manifest.overhead_cap_percent}%",
         ]
+        if manifest.currency:
+            lines.append(f"Budget currency: {manifest.currency} — write ALL budget figures in {manifest.currency}")
+        if manifest.budget_max:
+            lines.append(f"Budget ceiling: {manifest.budget_max:,.0f} {manifest.currency} max — total budget MUST NOT exceed this ceiling")
+        if manifest.max_duration_months:
+            lines.append(f"Max project duration: {manifest.max_duration_months} months")
+        if manifest.deadline:
+            lines.append(f"Submission deadline: {manifest.deadline}")
         gates = manifest.hard_eligibility_gates or {}
         if gates:
             lines.append("Hard eligibility gates: " + ", ".join(f"{k}={v}" for k, v in gates.items()))
@@ -365,14 +367,43 @@ def project_logframe_to_matrix(structured: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def generate_narrative_sections(logframe_data: Dict[str, Any], context_data: Dict[str, Any], donor: str = "OCHA_CBPF") -> Dict[str, str]:
-    """Generate donor-compliant narrative sections adhering to character limits."""
+    """Generate donor-compliant narrative sections adhering to character limits.
+
+    Call-aware (VISION): when the donor manifest defines its OWN mandatory
+    sections (call-ingested donors like UNFPA CEFM with 15 Annex sections),
+    the generator writes THOSE sections — not the legacy OCHA 5. Char limits
+    come from manifest max_char_limits when present (default 3000).
+    """
     profile = get_donor_profile(donor)
     country = context_data.get("country", "Target Country")
     theme = context_data.get("theme", "Emergency Response")
     donor_reqs = _donor_manifest_context(donor)  # call-aware: what THIS donor requires
 
+    # ── Resolve the ACTUAL manifest (call-ingested donors included) ────────
+    try:
+        from engine.yaml_rules import YamlDonorRuleLoader
+        from engine.donor_resolver import resolve_donor_id
+
+        loader = YamlDonorRuleLoader()
+        yaml_donor = resolve_donor_id(donor, loader)
+        manifest = loader.load(yaml_donor)
+    except Exception:
+        manifest = None
+
+    # Section plan: manifest sections win over legacy donor_rules profile
+    if manifest is not None and manifest.mandatory_sections:
+        plan = []
+        for key in manifest.mandatory_sections:
+            plan.append({
+                "key": key,
+                "title": key.replace("_", " ").title(),
+                "max_chars": int((manifest.max_char_limits or {}).get(key, 3000)),
+            })
+    else:
+        plan = [{"key": s["key"], "title": s["title"], "max_chars": s["max_chars"]} for s in profile["sections"]]
+
     sections = {}
-    for sec in profile["sections"]:
+    for sec in plan:
         key = sec["key"]
         title = sec["title"]
         max_c = sec["max_chars"]

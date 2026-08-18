@@ -27,6 +27,7 @@ try:
         extract_requirements,
         build_manifest_draft,
         save_manifest,
+        verify_gates_against_text,
     )
     from engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine
 except ImportError:
@@ -36,6 +37,7 @@ except ImportError:
         extract_requirements,
         build_manifest_draft,
         save_manifest,
+        verify_gates_against_text,
     )
     from proposal.engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine
 
@@ -134,6 +136,39 @@ def test_save_manifest_and_engine_pickup(tmp_path, monkeypatch):
     result = engine.score("new_donor_2026", {"setup_id": "s1", "narrative_data": {}})
     assert result["donor_id"] == "new_donor_2026"
     assert len(result["trace"]) == 5
+
+
+# ── Anti-hallucination gate verification ──────────────────────────────────
+def test_verify_gates_drops_unfounded():
+    """LLM-claimed gates without textual evidence are dropped (VISION)."""
+    unfpa_text = (
+        "UNFPA Türkiye invites CSOs to submit grant proposals for the prevention "
+        "of Child, Early, and Forced Marriages (CEFM). The project aims to enhance "
+        "technical capacities of CSOs and strengthen multi-sectoral collaboration. "
+        "Children and women at risk/survivors of CEFM have better access to quality "
+        "protection and response services in line with international standards."
+    )
+    llm_gates = {
+        "psea_policy_mandatory": True,          # NOT in call text -> drop
+        "sphere_standards_mandatory": True,     # NOT in call text -> drop
+        "min_displaced_ratio": 0.5,             # no IDP/refugee mention -> drop
+    }
+    verified = verify_gates_against_text(llm_gates, unfpa_text)
+    assert verified == {}
+
+
+def test_verify_gates_keeps_evidenced():
+    """Gates with real textual evidence survive verification."""
+    echo_text = (
+        "Applicants must demonstrate PSEA compliance. Sphere standards apply: "
+        "15L/person/day. At least 50% of beneficiaries must be IDPs."
+    )
+    gates = {
+        "psea_policy_mandatory": True,
+        "sphere_standards_mandatory": True,
+        "min_displaced_ratio": 0.5,
+    }
+    assert verify_gates_against_text(gates, echo_text) == gates
 
 
 # ── API contract (ingest -> review -> publish) ───────────────────────────

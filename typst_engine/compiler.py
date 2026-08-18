@@ -29,15 +29,61 @@ def escape_typst(text: Any) -> str:
     return s
 
 
-def render_typst_document(proposal: Dict[str, Any]) -> str:
-    """Produce complete, valid Typst source code from a proposal dictionary."""
+def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str, Any]] = None) -> str:
+    """Produce complete, valid Typst source code from a proposal dictionary.
+
+    analysis: optional engine score result (total_score, passed, eligibility,
+    trace). When present it drives the COMPLIANCE badge, the eligibility
+    banner and the audit section — so the PDF always mirrors the real
+    deterministic score instead of a hardcoded 94/100.
+    """
     title = escape_typst(proposal.get("title") or "Humanitarian Emergency Response Proposal")
     country = escape_typst(proposal.get("country") or "Global")
     donor = escape_typst(proposal.get("donor") or "OCHA_CBPF")
     theme = escape_typst(proposal.get("theme") or "Multi-sector")
 
     review = proposal.get("review_data") or {}
-    score = f"{review.get('score', 94):.0f}/100" if isinstance(review, dict) and "score" in review else "94/100"
+    if analysis and isinstance(analysis, dict) and "total_score" in analysis:
+        score = f"{float(analysis['total_score']):.0f}/100"
+        passed = bool(analysis.get("passed"))
+        eligibility_status = (analysis.get("eligibility") or {}).get("status", "ELIGIBLE" if passed else "AUTOMATIC_REJECTION")
+        failed_quotas = (analysis.get("eligibility") or {}).get("failed_quotas", [])
+        trace = analysis.get("trace", [])
+    else:
+        score = f"{review.get('score', 94):.0f}/100" if isinstance(review, dict) and "score" in review else "94/100"
+        passed = review.get("verdict", "pass") != "fail"
+        eligibility_status = "ELIGIBLE" if passed else "AUTOMATIC_REJECTION"
+        failed_quotas = []
+        trace = []
+
+    # Trace-derived audit bullet lines (real criterion scores)
+    audit_lines = []
+    for t in trace[:6]:
+        audit_lines.append(
+            f"• {str(t.get('criterion', '')).replace('_', ' ').title()}: "
+            f"{t.get('score', 0)}/{t.get('max_score', 0)} pts."
+        )
+    if not audit_lines:
+        audit_lines.append("• Deterministic compliance scoring completed against donor manifest.")
+
+    # ── Eligibility verdict block (real status, not hardcoded PASS) ────────
+    if eligibility_status == "AUTOMATIC_REJECTION":
+        verdict_fill = "dc2626"
+        verdict_text = "REJECTED"
+        verdict_label = "AUTOMATIC REJECTION — MANDATORY ELIGIBILITY GATES FAILED"
+        verdict_body = f"Failed quotas: {', '.join(failed_quotas) or 'none'}." + \
+                       " The proposal cannot be submitted until these are resolved."
+        block_fill = "fef2f2"
+        block_stroke = "fca5a5"
+    else:
+        verdict_fill = "15803d"
+        verdict_text = "PASS" if passed else "CONDITIONAL"
+        verdict_label = "DONOR COMPLIANCE VERIFICATION"
+        verdict_body = (f"Score {score} meets the donor pass threshold. " +
+                        "All mandatory eligibility gates satisfied." if passed else
+                        f"Score {score} below threshold — review the score trace.")
+        block_fill = "f0fdf4"
+        block_stroke = "86efac"
 
     ctx = proposal.get("context_data") or {}
     needs = ctx.get("needs_assessment", "")
@@ -343,10 +389,10 @@ def render_typst_document(proposal: Dict[str, Any]) -> str:
 = 6. Blind Verifier Audit & Quality Assurance
 
 #block(
-  fill: rgb("f0fdf4"),
+  fill: rgb(""" + '"' + block_fill + '"' + """),
   inset: 9pt,
   radius: 4pt,
-  stroke: 1pt + rgb("86efac"),
+  stroke: 1pt + rgb(""" + '"' + block_stroke + '"' + """),
   width: 100%,
   [
     #grid(
@@ -354,17 +400,19 @@ def render_typst_document(proposal: Dict[str, Any]) -> str:
       gutter: 10pt,
       align: horizon,
       block(
-        fill: rgb("15803d"),
+        fill: rgb(""" + '"' + verdict_fill + '"' + """),
         inset: (x: 8pt, y: 6pt),
         radius: 3pt,
-        text(12pt, fill: white, weight: "bold")[PASS]
+        text(12pt, fill: white, weight: "bold")[""" + verdict_text + """]
       ),
       [
-        #text(8.5pt, weight: "bold", fill: rgb("166534"))[Automated Donor Compliance Verification (Score: """ + score + """)]\\
-        #text(8pt, fill: rgb("14532d"))[
-          • OCHA CBPF Character Counts: All sections within 4,000-character threshold.\\
-          • USAID/BHA Quota Check: 53.5% vulnerable refugee/IDP population verified.\\
-          • PSEA & Sphere Alignment: All humanitarian minimum standards satisfied.
+        #text(8.5pt, weight: "bold", fill: rgb(""" + '"' + verdict_fill + '"' + """))[""" + verdict_label + """ (Score: """ + score + """)]\\
+        #text(8pt, fill: rgb("374151"))[
+          """ + verdict_body + """
+        ]\\
+        #v(2pt)
+        #text(8pt, fill: rgb("4b5563"))[
+          """ + "\\\n".join(audit_lines) + """
         ]
       ]
     )
@@ -374,11 +422,16 @@ def render_typst_document(proposal: Dict[str, Any]) -> str:
     return doc
 
 
-def compile_pdf(proposal: Dict[str, Any], output_path: Optional[str] = None) -> bytes:
-    """Compile proposal dictionary to PDF via Typst and return bytes."""
+def compile_pdf(proposal: Dict[str, Any], output_path: Optional[str] = None, analysis: Optional[Dict[str, Any]] = None) -> bytes:
+    """Compile proposal dictionary to PDF via Typst and return bytes.
+
+    analysis: optional deterministic engine result — when provided the PDF's
+    COMPLIANCE badge, eligibility verdict and audit bullets reflect the REAL
+    score (not a hardcoded 94/100).
+    """
     import typst
 
-    typst_source = render_typst_document(proposal)
+    typst_source = render_typst_document(proposal, analysis=analysis)
     prop_id = proposal.get("id", "sample_proposal")
 
     with tempfile.NamedTemporaryFile("w", suffix=".typ", delete=False, encoding="utf-8") as f:

@@ -30,6 +30,7 @@ try:
         compute_budget_summary,
     )
     from engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine
+    from engine.donor_resolver import resolve_donor_id
 except ImportError:
     from proposal.db import get_proposal, lock_step, update_proposal
     from proposal.engine.models import (
@@ -39,6 +40,7 @@ except ImportError:
         compute_budget_summary,
     )
     from proposal.engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine
+    from proposal.engine.donor_resolver import resolve_donor_id
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +54,7 @@ BUDGET_CATEGORIES = [
 
 
 def _resolve_donor(prop) -> str:
-    donor_key = (prop.get("donor") or "OCHA_CBPF").lower().replace("_", "")
-    alias_map = {"ochacbpf": "ocha_cbpf", "usaidbha": "usaid_bha", "euprag": "eu_prag"}
-    return alias_map.get(donor_key, donor_key)
+    return resolve_donor_id(prop.get("donor", "OCHA_CBPF"))
 
 
 def _risk_report(risk_rows) -> dict:

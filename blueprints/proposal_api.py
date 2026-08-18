@@ -23,6 +23,7 @@ try:
     from engine.verifier import run_blind_verifier
     from engine.advisor import advisor_chat
     from engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine, get_rule_engine
+    from engine.donor_resolver import resolve_donor_id
     from typst_engine.compiler import compile_pdf
 except ImportError:
     from proposal.db import (
@@ -40,6 +41,7 @@ except ImportError:
     from proposal.engine.verifier import run_blind_verifier
     from proposal.engine.advisor import advisor_chat
     from proposal.engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine, get_rule_engine
+    from proposal.engine.donor_resolver import resolve_donor_id
     from proposal.typst_engine.compiler import compile_pdf
 
 logger = logging.getLogger(__name__)
@@ -71,17 +73,8 @@ def handle_analyze(proposal_id: str):
     if not prop:
         return jsonify({"error": "Proposal not found"}), 404
 
-    donor_key = (prop.get("donor") or "OCHA_CBPF").lower().replace("_", "")
-    # Map legacy donor keys (OCHA_CBPF, USAID_BHA, EU_PRAG) to YAML ids
-    alias_map = {
-        "ochacbpf": "ocha_cbpf",
-        "usaidbha": "usaid_bha",
-        "euprag": "eu_prag",
-    }
-    yaml_donor = alias_map.get(donor_key, donor_key)
-
     engine = get_rule_engine()
-    result = engine.score(yaml_donor, prop)
+    result = engine.score(resolve_donor_id(prop.get("donor", "OCHA_CBPF")), prop)
     return jsonify(result)
 
 
@@ -296,11 +289,8 @@ def handle_advisor_chat(proposal_id: str):
         from engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine
         from engine.advisor_context import AdvisorContextBuilder
 
-        donor_key = (prop.get("donor") or "OCHA_CBPF").lower().replace("_", "")
-        alias_map = {"ochacbpf": "ocha_cbpf", "usaidbha": "usaid_bha", "euprag": "eu_prag"}
-        yaml_donor = alias_map.get(donor_key, donor_key)
-
         loader = YamlDonorRuleLoader()
+        yaml_donor = resolve_donor_id(prop.get("donor", "OCHA_CBPF"), loader)
         manifest = loader.load(yaml_donor)
         engine = DonorScoringEngine(loader)
         engine_result = engine.score(yaml_donor, prop)
@@ -328,10 +318,7 @@ def get_full_summary(proposal_id: str):
         return jsonify({"error": "Proposal not found"}), 404
 
     # Deterministic analysis (same engine as /analyze)
-    donor_key = (prop.get("donor") or "OCHA_CBPF").lower().replace("_", "")
-    alias_map = {"ochacbpf": "ocha_cbpf", "usaidbha": "usaid_bha", "euprag": "eu_prag"}
-    yaml_donor = alias_map.get(donor_key, donor_key)
-    analysis = get_rule_engine().score(yaml_donor, prop)
+    analysis = get_rule_engine().score(resolve_donor_id(prop.get("donor", "OCHA_CBPF")), prop)
 
     reviews = get_reviews(proposal_id)
 
@@ -370,10 +357,7 @@ def handle_export_pdf(proposal_id: str):
         return jsonify({"error": "Proposal not found"}), 404
 
     # Final verification gate: hard eligibility check before compile
-    donor_key = (prop.get("donor") or "OCHA_CBPF").lower().replace("_", "")
-    alias_map = {"ochacbpf": "ocha_cbpf", "usaidbha": "usaid_bha", "euprag": "eu_prag"}
-    yaml_donor = alias_map.get(donor_key, donor_key)
-    analysis = get_rule_engine().score(yaml_donor, prop)
+    analysis = get_rule_engine().score(resolve_donor_id(prop.get("donor", "OCHA_CBPF")), prop)
     elig = analysis.get("eligibility", {})
     if elig.get("status") == "AUTOMATIC_REJECTION":
         failed = ", ".join(elig.get("failed_quotas") or [])
@@ -383,7 +367,8 @@ def handle_export_pdf(proposal_id: str):
             "failed_quotas": elig.get("failed_quotas", []),
         }), 403
 
-    pdf_bytes = compile_pdf(prop)
+    # Pass the real deterministic score into the PDF (badge + audit bullets)
+    pdf_bytes = compile_pdf(prop, analysis=analysis)
     if not pdf_bytes:
         return jsonify({"error": "PDF compilation failed"}), 500
 

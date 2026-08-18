@@ -26,12 +26,14 @@ try:
     from engine.smart_parser import parse_indicators_list, validate_indicators
     from engine.generator import generate_logframe, project_logframe_to_matrix
     from engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine
+    from engine.donor_resolver import resolve_donor_id
 except ImportError:
     from proposal.db import get_proposal, lock_step, update_proposal
     from proposal.engine.models import iter_indicator_entries
     from proposal.engine.smart_parser import parse_indicators_list, validate_indicators
     from proposal.engine.generator import generate_logframe, project_logframe_to_matrix
     from proposal.engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine
+    from proposal.engine.donor_resolver import resolve_donor_id
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +80,7 @@ def analyze_step3():
     # Donor smart_criteria score (deterministic engine)
     loader = YamlDonorRuleLoader()
     engine = DonorScoringEngine(loader)
-    donor_id = _resolve_donor(prop)
+    donor_id = resolve_donor_id(prop.get("donor", "OCHA_CBPF"), loader)
     scored = engine.score(donor_id, prop)
     smart_trace = next(
         (t for t in scored["trace"] if t["criterion"] == "smart_criteria"), {}
