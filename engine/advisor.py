@@ -11,7 +11,7 @@ deterministic scoring engine's trace), NOT the raw proposal dump.
 import json
 import logging
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import httpx
 
 try:
@@ -27,6 +27,50 @@ except ImportError:
     from proposal.engine.advisor_context import AdvisorContext, build_advisor_system_prompt
 
 logger = logging.getLogger(__name__)
+
+
+# ── Small-talk fast path (deterministic, no LLM call) ─────────────────────
+_GREETINGS = ("merhaba", "selam", "hello", "hi", "hey", "good morning", "good evening", "good afternoon", "nasılsın", "nasilsin", "naber")
+_THANKS = ("teşekkür", "tesekkur", "thanks", "thank you", "sağol", "sagol", "eyvallah")
+
+
+def _small_talk_reply(user_message: str, title: str, donor: str, country: str, step: int) -> Optional[str]:
+    """Deterministic replies for greetings/thanks — no LLM cost."""
+    msg = (user_message or "").strip().lower()
+    if not msg:
+        return None
+    if any(g in msg for g in _GREETINGS):
+        return (
+            f"Merhaba! 👋 Ben senin GMS Proposal Advisor'ın. Şu an **'{title}'** "
+            f"({donor}, {country}) üzerinde çalışıyorsun — **Step {step}/6**'dasın.\n\n"
+            f"Bana istediğini sorabilirsin: gösterge SMART mı, bütçe cap'e uyuyor mu, "
+            f"hangi bölüm zayıf, ya da 'şunu düzelt' deyip aksiyon aldırabilirsin. "
+            f"Nasıl ilerleyelim?"
+        )
+    if any(t in msg for t in _THANKS):
+        return (
+            "Rica ederim! 🙌 Başka bir şey istersen buradayım — "
+            "örneğin logframe göstergelerini SMART kontrol edebilir, "
+            "narrative bölümlerini donor kurallarına göre gözden geçirebilirim."
+        )
+    return None
+
+
+def _proposal_status_summary(proposal: Dict[str, Any]) -> str:
+    """Compact status summary so the advisor knows where the proposal stands."""
+    donor = proposal.get("donor", "OCHA_CBPF")
+    step = proposal.get("step", 1)
+    title = proposal.get("title", "Untitled")
+    country = proposal.get("country", "—")
+    logframe = proposal.get("logframe_data") or {}
+    narrative = proposal.get("narrative_data") or {}
+    matrix = logframe.get("matrix", []) if isinstance(logframe, dict) else []
+    nar_count = len(narrative) if isinstance(narrative, dict) else 0
+    refs = proposal.get("references") or []
+    return (
+        f"Proposal: '{title}' | donor={donor} | country={country} | step={step}/6 | "
+        f"logframe_rows={len(matrix)} | narrative_sections={nar_count} | references={len(refs)}"
+    )
 
 
 def advisor_chat(
@@ -45,6 +89,15 @@ def advisor_chat(
     title = proposal.get("title", "Proposal")
     logframe = proposal.get("logframe_data") or {}
     narrative = proposal.get("narrative_data") or {}
+    step = proposal.get("step", 1)
+
+    # ── Small-talk fast path (deterministic, no LLM call) ──────────────────
+    small_talk = _small_talk_reply(user_message, title, donor, country, step)
+    if small_talk is not None:
+        return {"message": small_talk, "patch": None}
+
+    # ── Proposal status summary (injected so the advisor knows where we are) ─
+    status_summary = _proposal_status_summary(proposal)
 
     # System prompt: context-aware when AdvisorContext provided
     if advisor_ctx is not None:
@@ -52,7 +105,12 @@ def advisor_chat(
     else:
         base_system = (
             f"You are an expert Senior Project Design Advisor assisting a proposal writer for a {donor} grant in {country}.\n"
-            "Provide constructive, precise feedback based on Sphere standards, IASC protection rules, and donor expectations.\n"
+            "You are a friendly, collaborative partner — not a robot. Start by acknowledging what the user says, "
+            "then give precise, actionable feedback.\n"
+            "When the user greets you (hello, hi, merhaba, selam), greet back warmly and briefly summarize the "
+            "current proposal status and what you recommend next.\n"
+            "When the user thanks you, acknowledge it and offer the next concrete step.\n"
+            "Always ground feedback in the proposal's actual state (step, score, gates) — never invent data.\n"
             "If you recommend a specific improvement to a Logframe cell or narrative section, include a structured patch block in this JSON format at the very end of your reply:\n"
             "```json\n"
             "{\n"
@@ -76,7 +134,7 @@ def advisor_chat(
             context_payload = f"Logframe: {json.dumps(logframe.get('matrix', []))}"
         messages.append({
             "role": "user",
-            "content": f"Advisor Context:\n{context_payload}\n\nUser Question: {user_message}",
+            "content": f"Proposal Status: {status_summary}\n\nAdvisor Context:\n{context_payload}\n\nUser Question: {user_message}",
         })
 
         headers = {

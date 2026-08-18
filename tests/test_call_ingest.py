@@ -226,6 +226,49 @@ def test_evidence_to_references_registry_entries():
     assert evidence_to_references({"source": "unavailable"}) == []
 
 
+# ── Advisor small-talk (deterministic, no LLM) ────────────────────────────
+def test_advisor_small_talk_greeting():
+    """Greeting gets a warm, status-aware reply without an LLM call."""
+    from engine.advisor import _small_talk_reply
+
+    reply = _small_talk_reply("merhaba", "WASH Project", "OCHA_CBPF", "Sudan", 3)
+    assert reply is not None
+    assert "WASH Project" in reply
+    assert "Step 3" in reply
+    assert "OCHA_CBPF" in reply
+
+
+def test_advisor_small_talk_thanks():
+    from engine.advisor import _small_talk_reply
+
+    reply = _small_talk_reply("teşekkürler", "X", "Y", "Z", 1)
+    assert reply is not None
+    assert "Rica ederim" in reply
+
+
+def test_advisor_small_talk_ignores_real_questions():
+    """Real questions must NOT be swallowed by the small-talk path."""
+    from engine.advisor import _small_talk_reply
+
+    assert _small_talk_reply("Are my WASH indicators SMART?", "X", "Y", "Z", 1) is None
+    assert _small_talk_reply("fix the budget", "X", "Y", "Z", 1) is None
+
+
+def test_advisor_status_summary():
+    from engine.advisor import _proposal_status_summary
+
+    prop = {
+        "title": "T", "donor": "unfpa_turkiye_cefm", "country": "Türkiye",
+        "step": 4, "logframe_data": {"matrix": [{"a": 1}]},
+        "narrative_data": {"s1": "x", "s2": "y"}, "references": [{"id": "R1"}],
+    }
+    s = _proposal_status_summary(prop)
+    assert "step=4/6" in s
+    assert "logframe_rows=1" in s
+    assert "narrative_sections=2" in s
+    assert "references=1" in s
+
+
 # ── API contract (ingest -> review -> publish) ───────────────────────────
 @pytest.fixture
 def client():
