@@ -5,24 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sightline — Proposal Design Pipeline & GMS Grant Engine</title>
   <link rel="stylesheet" href="/static/css/proposal.css">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📝</text></svg>">
 </head>
 <body>
 
-  <!-- Top App Header -->
+  <a class="skip-link" href="#workspace">Skip to workspace</a>
+
+  <!-- Top App Header — Liquid Glass -->
   <header class="app-header">
     <div class="brand-group">
       <span class="brand-badge">SIGHTLINE</span>
       <span class="brand-title">Grant Management Proposal Engine</span>
-      <span id="activeDonorBadge" style="font-size: 11px; background: #1e293b; color: #38bdf8; padding: 2px 8px; border-radius: 4px; border: 1px solid #334155;">OCHA_CBPF</span>
+      <span id="activeDonorBadge" class="donor-badge">OCHA_CBPF</span>
     </div>
 
     <div class="header-actions">
       <span id="autosaveIndicator" class="autosave-status saved">
-        <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:currentColor;"></span>
+        <span class="dot"></span>
         <span>All changes saved</span>
       </span>
-      <select id="proposalSelect" class="input-select" style="width: 220px; padding: 5px 8px; font-size: 12px;">
+      <select id="proposalSelect" class="input-select" style="width: 220px;">
         <option value="">-- Select or Create Proposal --</option>
       </select>
       <button id="btnNewProposal" class="btn btn-sm btn-primary">+ New Proposal</button>
@@ -30,11 +32,11 @@
   </header>
 
   <!-- Main Split Layout -->
-  <main class="main-layout">
-    
+  <main class="main-layout" id="workspace">
+
     <!-- Left Workspace (65%) -->
     <section class="workspace-pane">
-      
+
       <!-- Step Navigation Bar -->
       <nav class="step-nav">
         <button class="step-btn active" data-step="1">
@@ -64,53 +66,55 @@
               <h2 class="step-title">Project Context & Donor Specifications</h2>
               <p class="step-subtitle">Define target country, donor guidelines (OCHA, USAID, EU), and vulnerable beneficiary quotas.</p>
             </div>
-            <button id="btnSaveStep1" class="btn btn-primary">Save & Continue -></button>
+            <button id="btnSaveStep1" class="btn btn-primary">Save & Continue &rarr;</button>
           </div>
 
-          <div class="form-grid">
-            <div class="form-group">
-              <label class="form-label">Project Title</label>
-              <input type="text" id="inputTitle" class="input-text" placeholder="e.g. Emergency WASH & Protection for Conflict-Affected IDPs">
+          <div class="glass-card">
+            <div class="form-grid">
+              <div class="form-group">
+                <label class="form-label" for="inputTitle">Project Title</label>
+                <input type="text" id="inputTitle" class="input-text" placeholder="e.g. Emergency WASH & Protection for Conflict-Affected IDPs">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="inputCountry">Target Country / Region</label>
+                <input type="text" id="inputCountry" class="input-text" placeholder="e.g. Sudan (Darfur)">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="selectDonor">Target Donor Framework</label>
+                <select id="selectDonor" class="input-select">
+                  <option value="OCHA_CBPF">UN OCHA CBPF (GPPi 8+3 Harmonized)</option>
+                  <option value="USAID_BHA">USAID BHA (Emergency Application Guidelines - EAG)</option>
+                  <option value="EU_PRAG">EU EuropeAid / ECHO (PRAG Guidelines)</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="inputTheme">Sector / Cluster Theme</label>
+                <input type="text" id="inputTheme" class="input-text" placeholder="e.g. WASH, Protection, Health, Shelter">
+              </div>
             </div>
 
             <div class="form-group">
-              <label class="form-label">Target Country / Region</label>
-              <input type="text" id="inputCountry" class="input-text" placeholder="e.g. Sudan (Darfur)">
+              <label class="form-label" for="inputHumSit">Humanitarian Situation & Crisis Background</label>
+              <textarea id="inputHumSit" class="input-textarea" placeholder="Describe the acute humanitarian triggers, conflict displacement, and geographical prioritization..."></textarea>
             </div>
 
             <div class="form-group">
-              <label class="form-label">Target Donor Framework</label>
-              <select id="selectDonor" class="input-select">
-                <option value="OCHA_CBPF">UN OCHA CBPF (GPPi 8+3 Harmonized)</option>
-                <option value="USAID_BHA">USAID BHA (Emergency Application Guidelines - EAG)</option>
-                <option value="EU_PRAG">EU EuropeAid / ECHO (PRAG Guidelines)</option>
-              </select>
+              <label class="form-label" for="inputNeeds">Sectoral Needs Assessment & Vulnerabilities</label>
+              <textarea id="inputNeeds" class="input-textarea" placeholder="Detail specific gaps, Sphere standard deficits (e.g. &lt; 15L water/day), and protection/PSEA risks..."></textarea>
             </div>
 
-            <div class="form-group">
-              <label class="form-label">Sector / Cluster Theme</label>
-              <input type="text" id="inputTheme" class="input-text" placeholder="e.g. WASH, Protection, Health, Shelter">
-            </div>
-          </div>
-
-          <div class="form-group" style="margin-bottom: 16px;">
-            <label class="form-label">Humanitarian Situation & Crisis Background</label>
-            <textarea id="inputHumSit" class="input-textarea" placeholder="Describe the acute humanitarian triggers, conflict displacement, and geographical prioritization..."></textarea>
-          </div>
-
-          <div class="form-group" style="margin-bottom: 16px;">
-            <label class="form-label">Sectoral Needs Assessment & Vulnerabilities</label>
-            <textarea id="inputNeeds" class="input-textarea" placeholder="Detail specific gaps, Sphere standard deficits (e.g. < 15L water/day), and protection/PSEA risks..."></textarea>
-          </div>
-
-          <div class="form-grid">
-            <div class="form-group">
-              <label class="form-label">Total Beneficiaries Reached</label>
-              <input type="number" id="inputBeneficiariesTotal" class="input-text" value="20000">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Displaced (IDPs / Refugees)</label>
-              <input type="number" id="inputBeneficiariesDisplaced" class="input-text" value="11000">
+            <div class="form-grid">
+              <div class="form-group">
+                <label class="form-label" for="inputBeneficiariesTotal">Total Beneficiaries Reached</label>
+                <input type="number" id="inputBeneficiariesTotal" class="input-text" value="20000">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="inputBeneficiariesDisplaced">Displaced (IDPs / Refugees)</label>
+                <input type="number" id="inputBeneficiariesDisplaced" class="input-text" value="11000">
+              </div>
             </div>
           </div>
         </div>
@@ -123,8 +127,8 @@
               <p class="step-subtitle">Causal transformation pathway from immediate inputs to sustainable resilience.</p>
             </div>
             <div style="display: flex; gap: 8px;">
-              <button id="btnAiGenerateToc" class="btn btn-primary">⚡ Generate ToC with AI</button>
-              <button id="btnNextStep2" class="btn">Next: Logframe -></button>
+              <button id="btnAiGenerateToc" class="btn btn-primary">Generate ToC with AI</button>
+              <button id="btnNextStep2" class="btn">Next: Logframe &rarr;</button>
             </div>
           </div>
 
@@ -132,9 +136,9 @@
             <!-- Rendered dynamically by JS -->
           </div>
 
-          <div style="margin-top: 20px;">
-            <h3 style="font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 8px;">Key Assumptions & Causal Hypotheses</h3>
-            <ul id="tocAssumptionsList" style="list-style: disc; padding-left: 20px; color: var(--text-muted); font-size: 12.5px; line-height: 1.8;">
+          <div class="glass-card" style="margin-top: 16px;">
+            <h3 style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px;">Key Assumptions & Causal Hypotheses</h3>
+            <ul id="tocAssumptionsList" style="list-style: disc; padding-left: 20px; color: var(--text-secondary); font-size: 12.5px; line-height: 1.8;">
               <!-- Assumptions list -->
             </ul>
           </div>
@@ -148,8 +152,8 @@
               <p class="step-subtitle">Fully editable matrix. Changes autosave automatically.</p>
             </div>
             <div style="display: flex; gap: 8px;">
-              <button id="btnAiGenerateLogframe" class="btn btn-primary">⚡ Generate Logframe with AI</button>
-              <button id="btnNextStep3" class="btn">Next: Narrative -></button>
+              <button id="btnAiGenerateLogframe" class="btn btn-primary">Generate Logframe with AI</button>
+              <button id="btnNextStep3" class="btn">Next: Narrative &rarr;</button>
             </div>
           </div>
 
@@ -179,12 +183,12 @@
               <p class="step-subtitle">Sections formatted per donor regulations with real-time character limit validation.</p>
             </div>
             <div style="display: flex; gap: 8px;">
-              <button id="btnAiGenerateNarrative" class="btn btn-primary">⚡ Draft All Sections with AI</button>
-              <button id="btnNextStep4" class="btn">Next: Verifier Audit -></button>
+              <button id="btnAiGenerateNarrative" class="btn btn-primary">Draft All Sections with AI</button>
+              <button id="btnNextStep4" class="btn">Next: Verifier Audit &rarr;</button>
             </div>
           </div>
 
-          <div id="narrativeTabsHeader" style="display: flex; gap: 6px; margin-bottom: 16px; overflow-x: auto;">
+          <div id="narrativeTabsHeader" class="narrative-tabs">
             <!-- Section tabs rendered dynamically -->
           </div>
 
@@ -201,8 +205,8 @@
               <p class="step-subtitle">Independent compliance audit and sub-10ms Typst PDF document generation.</p>
             </div>
             <div style="display: flex; gap: 8px;">
-              <button id="btnRunVerifier" class="btn btn-primary">🛡️ Run Verifier Audit</button>
-              <button id="btnExportPdf" class="btn btn-emerald">📥 Download Typst PDF</button>
+              <button id="btnRunVerifier" class="btn btn-primary">Run Verifier Audit</button>
+              <button id="btnExportPdf" class="btn btn-emerald">Download Typst PDF</button>
             </div>
           </div>
 
@@ -210,13 +214,13 @@
           <div id="verifierScorecard" class="verifier-card">
             <div id="scoreBanner" class="score-banner pass">
               <div>
-                <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.05em; color: var(--accent-emerald);">AUTOMATED DONOR COMPLIANCE VERIFICATION</div>
-                <div id="verifierSummaryText" style="font-size: 13.5px; color: #fff; margin-top: 4px;">Proposal satisfies all donor constraints and Sphere minimum standards.</div>
+                <div class="score-label">AUTOMATED DONOR COMPLIANCE VERIFICATION</div>
+                <div id="verifierSummaryText" class="score-text">Proposal satisfies all donor constraints and Sphere minimum standards.</div>
               </div>
               <div id="verifierScoreVal" class="score-num">94/100</div>
             </div>
 
-            <h3 style="font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 10px;">Audit Findings & Recommendations</h3>
+            <h3 style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 10px;">Audit Findings & Recommendations</h3>
             <div id="verifierIssuesList">
               <!-- Issue items rendered dynamically -->
             </div>
@@ -229,10 +233,8 @@
     <!-- Right AI Advisor Pane (35%) -->
     <aside class="advisor-pane">
       <div class="advisor-header">
-        <div class="advisor-title">
-          <span style="color: var(--accent-cyan);">⚡</span> AI Project Advisor
-        </div>
-        <span style="font-size: 11px; color: var(--text-dim);">Blind Verifier Assistant</span>
+        <div class="advisor-title">AI Project Advisor</div>
+        <span class="advisor-sub">Blind Verifier Assistant</span>
       </div>
 
       <div id="advisorMessages" class="advisor-messages">

@@ -121,7 +121,7 @@
       el.autosaveIndicator.innerHTML = '<span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:currentColor;"></span><span>All changes saved</span>';
     } catch (e) {
       el.autosaveIndicator.className = 'autosave-status';
-      el.autosaveIndicator.innerHTML = `<span style="color:var(--accent-rose)">⚠️ Save failed: ${e.message}</span>`;
+      el.autosaveIndicator.innerHTML = `<span style="color:var(--red)">Save failed: ${e.message}</span>`;
     }
   }
 
@@ -191,8 +191,8 @@
 
     if (nodes.length === 0) {
       el.tocVisualizer.innerHTML = `
-        <div style="text-align:center; padding:30px; width:100%; color:var(--text-dim);">
-          No Theory of Change generated yet. Click <strong>"⚡ Generate ToC with AI"</strong> to create the causal pathway.
+        <div style="text-align:center; padding:30px; width:100%; color:var(--text-secondary);">
+          No Theory of Change generated yet. Click <strong>"Generate ToC with AI"</strong> to create the causal pathway.
         </div>
       `;
       el.tocAssumptionsList.innerHTML = '<li>No assumptions recorded yet.</li>';
@@ -204,11 +204,11 @@
       html += `
         <div class="toc-node ${node.type || 'output'}">
           <div class="toc-node-badge">${node.type || 'STEP'}</div>
-          <div style="font-size:12px; color:#fff; font-weight:500;">${esc(node.label)}</div>
+          <div class="toc-node-label">${esc(node.label)}</div>
         </div>
       `;
       if (i < nodes.length - 1) {
-        html += `<div class="toc-arrow">➔</div>`;
+        html += `<div class="toc-arrow">&rarr;</div>`;
       }
     });
     el.tocVisualizer.innerHTML = html;
@@ -225,8 +225,8 @@
     if (matrix.length === 0) {
       el.logframeBody.innerHTML = `
         <tr>
-          <td colspan="5" style="text-align:center; padding:30px; color:var(--text-dim);">
-            No Logframe Matrix generated yet. Click <strong>"⚡ Generate Logframe with AI"</strong> to populate.
+          <td colspan="5" style="text-align:center; padding:30px; color:var(--text-secondary);">
+            No Logframe Matrix generated yet. Click <strong>"Generate Logframe with AI"</strong> to populate.
           </td>
         </tr>
       `;
@@ -237,7 +237,7 @@
     matrix.forEach((row, rIdx) => {
       html += `
         <tr data-row="${rIdx}">
-          <td style="font-weight:600; color:var(--accent-cyan); background:rgba(15,23,42,0.6);">${esc(row.level)}</td>
+          <td class="level-cell">${esc(row.level)}</td>
           <td><textarea class="editable-cell" data-row="${rIdx}" data-field="logic">${esc(row.logic)}</textarea></td>
           <td><textarea class="editable-cell" data-row="${rIdx}" data-field="indicators">${esc(row.indicators)}</textarea></td>
           <td><textarea class="editable-cell" data-row="${rIdx}" data-field="mov">${esc(row.mov)}</textarea></td>
@@ -276,7 +276,7 @@
       const isOver = text.length > sec.max_chars;
       tabsHtml += `
         <button class="step-btn ${active}" data-tab="${sec.key}" style="padding:6px 12px; font-size:12px;">
-          ${esc(sec.title)} ${isOver ? '⚠️' : ''}
+          ${esc(sec.title)} ${isOver ? '(OVER LIMIT)' : ''}
         </button>
       `;
     });
@@ -285,7 +285,7 @@
     // Render Active Section Textarea
     const curSec = profile.sections.find(s => s.key === state.activeNarrativeTab) || profile.sections[0];
     if (!curSec) {
-      el.narrativeSectionsContainer.innerHTML = '<div style="color:var(--text-dim);">No sections available.</div>';
+      el.narrativeSectionsContainer.innerHTML = '<div style="color:var(--text-secondary);">No sections available.</div>';
       return;
     }
 
@@ -342,7 +342,7 @@
 
     if (issues.length === 0) {
       el.verifierIssuesList.innerHTML = `
-        <div style="color:var(--accent-emerald); font-size:12.5px; padding:12px; background:rgba(16,185,129,0.08); border-radius:4px;">
+        <div style="color:#1e9e4f; font-size:12.5px; padding:12px; background:var(--green-light); border-radius:4px;">
           ✓ All donor constraints, character limits, and vulnerable population quotas satisfied.
         </div>
       `;
@@ -354,11 +354,11 @@
       const crit = iss.severity === 'critical';
       html += `
         <div class="issue-item ${crit ? 'critical' : ''}">
-          <div style="font-size:11.5px; font-weight:700; color:${crit ? 'var(--accent-rose)' : 'var(--accent-amber)'}">
+          <div class="issue-tag">
             ${crit ? 'CRITICAL COMPLIANCE ISSUE' : 'RECOMMENDED REFINEMENT'} • ${esc(iss.rule || 'rule')}
           </div>
-          <div style="font-size:12.5px; color:#fff; margin-top:2px;">${esc(iss.message || iss.description || '')}</div>
-          ${iss.recommendation ? `<div style="font-size:11.5px; color:var(--text-muted); margin-top:4px;"><em>Recommendation:</em> ${esc(iss.recommendation)}</div>` : ''}
+          <div class="issue-msg">${esc(iss.message || iss.description || '')}</div>
+          ${iss.recommendation ? `<div class="issue-rec"><em>Recommendation:</em> ${esc(iss.recommendation)}</div>` : ''}
         </div>
       `;
     });
@@ -406,7 +406,7 @@
       const patchBox = document.createElement('div');
       patchBox.className = 'patch-box';
       patchBox.innerHTML = `
-        <div class="patch-header">⚡ Recommended Logframe Refinement</div>
+        <div class="patch-header">Recommended Logframe Refinement</div>
         <div class="patch-content">Row ${patch.row_index + 1} (${patch.field}): "${esc(patch.suggested_value)}"</div>
         <button class="btn btn-sm btn-primary" style="margin-top:6px; align-self:flex-start;">Apply Refinement to Logframe</button>
       `;
@@ -436,7 +436,7 @@
   async function handleGenerateToc() {
     if (!state.activeProposalId) return;
     el.btnAiGenerateToc.disabled = true;
-    el.btnAiGenerateToc.textContent = '⚡ Generating Theory of Change...';
+    el.btnAiGenerateToc.textContent = 'Generating Theory of Change...';
     try {
       collectStep1Inputs();
       await saveCurrentState();
@@ -447,14 +447,14 @@
       alert(`Error generating ToC: ${e.message}`);
     } finally {
       el.btnAiGenerateToc.disabled = false;
-      el.btnAiGenerateToc.textContent = '⚡ Generate ToC with AI';
+      el.btnAiGenerateToc.textContent = 'Generate ToC with AI';
     }
   }
 
   async function handleGenerateLogframe() {
     if (!state.activeProposalId) return;
     el.btnAiGenerateLogframe.disabled = true;
-    el.btnAiGenerateLogframe.textContent = '⚡ Generating 4x4 Logframe...';
+    el.btnAiGenerateLogframe.textContent = 'Generating 4x4 Logframe...';
     try {
       const res = await api(`/api/proposals/${state.activeProposalId}/generate-logframe`, { method: 'POST' });
       state.proposal = res.proposal;
@@ -463,14 +463,14 @@
       alert(`Error generating Logframe: ${e.message}`);
     } finally {
       el.btnAiGenerateLogframe.disabled = false;
-      el.btnAiGenerateLogframe.textContent = '⚡ Generate Logframe with AI';
+      el.btnAiGenerateLogframe.textContent = 'Generate Logframe with AI';
     }
   }
 
   async function handleGenerateNarrative() {
     if (!state.activeProposalId) return;
     el.btnAiGenerateNarrative.disabled = true;
-    el.btnAiGenerateNarrative.textContent = '⚡ Drafting All Sections...';
+    el.btnAiGenerateNarrative.textContent = 'Drafting All Sections...';
     try {
       const res = await api(`/api/proposals/${state.activeProposalId}/generate-narrative`, { method: 'POST' });
       state.proposal = res.proposal;
@@ -479,14 +479,14 @@
       alert(`Error generating Narrative: ${e.message}`);
     } finally {
       el.btnAiGenerateNarrative.disabled = false;
-      el.btnAiGenerateNarrative.textContent = '⚡ Draft All Sections with AI';
+      el.btnAiGenerateNarrative.textContent = 'Draft All Sections with AI';
     }
   }
 
   async function handleRunVerifier() {
     if (!state.activeProposalId) return;
     el.btnRunVerifier.disabled = true;
-    el.btnRunVerifier.textContent = '🛡️ Auditing Compliance...';
+    el.btnRunVerifier.textContent = 'Auditing Compliance...';
     try {
       await saveCurrentState();
       const res = await api(`/api/proposals/${state.activeProposalId}/verify`, { method: 'POST' });
@@ -496,7 +496,7 @@
       alert(`Error auditing: ${e.message}`);
     } finally {
       el.btnRunVerifier.disabled = false;
-      el.btnRunVerifier.textContent = '🛡️ Run Verifier Audit';
+      el.btnRunVerifier.textContent = 'Run Verifier Audit';
     }
   }
 
