@@ -30,28 +30,28 @@ logger = logging.getLogger(__name__)
 
 
 # ── Small-talk fast path (deterministic, no LLM call) ─────────────────────
-_GREETINGS = ("merhaba", "selam", "hello", "hi", "hey", "good morning", "good evening", "good afternoon", "nasılsın", "nasilsin", "naber")
-_THANKS = ("teşekkür", "tesekkur", "thanks", "thank you", "sağol", "sagol", "eyvallah")
+# Language policy: the advisor ALWAYS answers in English, even when the user
+# greets in Turkish — the product language is English (user directive).
+_GREETINGS = ("hello", "hi", "hey", "good morning", "good evening", "good afternoon", "merhaba", "selam", "nasılsın", "naber")
+_THANKS = ("thanks", "thank you", "teşekkür", "tesekkur", "sağol", "eyvallah")
 
 
 def _small_talk_reply(user_message: str, title: str, donor: str, country: str, step: int) -> Optional[str]:
-    """Deterministic replies for greetings/thanks — no LLM cost."""
+    """Deterministic replies for greetings/thanks — no LLM cost. English only."""
     msg = (user_message or "").strip().lower()
     if not msg:
         return None
     if any(g in msg for g in _GREETINGS):
         return (
-            f"Merhaba! 👋 Ben senin GMS Proposal Advisor'ın. Şu an **'{title}'** "
-            f"({donor}, {country}) üzerinde çalışıyorsun — **Step {step}/6**'dasın.\n\n"
-            f"Bana istediğini sorabilirsin: gösterge SMART mı, bütçe cap'e uyuyor mu, "
-            f"hangi bölüm zayıf, ya da 'şunu düzelt' deyip aksiyon aldırabilirsin. "
-            f"Nasıl ilerleyelim?"
+            f"Hello! 👋 I'm your GMS Proposal Advisor. You're currently working on "
+            f"**'{title}'** ({donor}, {country}) — at **Step {step}/6**.\n\n"
+            f"Ask me anything: whether an indicator is SMART, whether the budget fits the cap, "
+            f"which section is weak, or just say 'fix it' and I'll propose an action. How shall we proceed?"
         )
     if any(t in msg for t in _THANKS):
         return (
-            "Rica ederim! 🙌 Başka bir şey istersen buradayım — "
-            "örneğin logframe göstergelerini SMART kontrol edebilir, "
-            "narrative bölümlerini donor kurallarına göre gözden geçirebilirim."
+            "You're welcome! 🙌 Anything else — I can run a SMART check on your logframe "
+            "indicators or review the narrative sections against the donor requirements."
         )
     return None
 
@@ -105,6 +105,7 @@ def advisor_chat(
     else:
         base_system = (
             f"You are an expert Senior Project Design Advisor assisting a proposal writer for a {donor} grant in {country}.\n"
+            "LANGUAGE POLICY: ALWAYS reply in English, no matter what language the user writes in.\n"
             "You are a friendly, collaborative partner — not a robot. Start by acknowledging what the user says, "
             "then give precise, actionable feedback.\n"
             "When the user greets you (hello, hi, merhaba, selam), greet back warmly and briefly summarize the "

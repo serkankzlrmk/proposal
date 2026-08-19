@@ -231,11 +231,16 @@ def test_advisor_small_talk_greeting():
     """Greeting gets a warm, status-aware reply without an LLM call."""
     from engine.advisor import _small_talk_reply
 
-    reply = _small_talk_reply("merhaba", "WASH Project", "OCHA_CBPF", "Sudan", 3)
+    reply = _small_talk_reply("hello", "WASH Project", "OCHA_CBPF", "Sudan", 3)
     assert reply is not None
     assert "WASH Project" in reply
     assert "Step 3" in reply
     assert "OCHA_CBPF" in reply
+    # Language policy: English even for Turkish greetings
+    tr_reply = _small_talk_reply("merhaba", "X", "Y", "Z", 1)
+    assert tr_reply is not None
+    assert "Hello" in tr_reply
+    assert "Merhaba" not in tr_reply
 
 
 def test_advisor_small_talk_thanks():
@@ -243,7 +248,7 @@ def test_advisor_small_talk_thanks():
 
     reply = _small_talk_reply("teşekkürler", "X", "Y", "Z", 1)
     assert reply is not None
-    assert "Rica ederim" in reply
+    assert "welcome" in reply.lower()
 
 
 def test_advisor_small_talk_ignores_real_questions():

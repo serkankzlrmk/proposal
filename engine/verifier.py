@@ -51,7 +51,8 @@ def run_blind_verifier(proposal: Dict[str, Any], donor: str = "OCHA_CBPF") -> Di
     # 3. LLM-as-a-Judge Independent Audit (Isolated Prompt)
     if OPENROUTER_API_KEY:
         system_prompt = (
-            "You are an independent Senior Donor Compliance Auditor for international aid proposals. "
+            "You are an independent Senior Donor Compliance Auditor for international aid proposals. " \
+            "LANGUAGE POLICY: ALWAYS respond in English, no matter the language of the proposal content. "
             "Evaluate ONLY the final provided proposal text against donor standards. "
             "You must identify any logical inconsistencies, missing Sphere indicators, or weak MoVs."
         )

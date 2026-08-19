@@ -129,7 +129,7 @@ def _call_llm(prompt: str, system_prompt: str = "", temperature: float = 0.3, ac
         "model": LLM_MODEL,
         "temperature": temperature,
         "messages": [
-            {"role": "system", "content": system_prompt or "You are an elite humanitarian grant proposal architect."},
+            {"role": "system", "content": system_prompt or "You are an elite humanitarian grant proposal architect. LANGUAGE POLICY: ALWAYS respond in English, no matter the user's input language."},
             {"role": "user", "content": prompt},
         ],
     }

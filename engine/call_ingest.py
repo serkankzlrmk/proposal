@@ -132,7 +132,8 @@ def extract_requirements(text: str) -> Dict[str, Any]:
     the pipeline never crashes and tests run offline.
     """
     prompt = (
-        "You are a humanitarian grants compliance analyst. Read this donor "
+        "You are a humanitarian grants compliance analyst. LANGUAGE POLICY: ALWAYS respond in English, " \
+        "no matter the language of the call documents. Read this donor "
         "call-for-proposals text and extract the hard requirements the donor "
         "states: mandatory sections/keywords, citation expectations, overhead "
         "cap, eligibility quotas (IDP ratio, PSEA, SADD, capacity score), "
