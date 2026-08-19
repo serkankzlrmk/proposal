@@ -371,9 +371,13 @@
 
       <!-- Upload new call -->
       <h3 style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px;">Or Upload a New Call</h3>
-      <div style="display:flex; gap:8px; align-items:center;">
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
         <input type="file" id="modalCallFiles" class="input-text" accept=".pdf,.docx,.md,.markdown,.txt" multiple style="flex:1; padding:8px;">
         <button class="btn btn-sm btn-primary" id="btnModalIngest">Ingest</button>
+      </div>
+      <div class="form-grid" style="grid-template-columns: 1fr 1.6fr;">
+        <input type="text" id="modalCallId" class="input-text" placeholder="Call ID (e.g. unfpa_turkiye_cefm)" style="padding:8px;">
+        <input type="text" id="modalCallName" class="input-text" placeholder="Display name (e.g. UNFPA Türkiye CEFM)" style="padding:8px;">
       </div>
     </div>
   </div>

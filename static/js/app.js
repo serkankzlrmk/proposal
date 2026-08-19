@@ -23,7 +23,7 @@
     btnNewProposal: document.getElementById('btnNewProposal'),
     autosaveIndicator: document.getElementById('autosaveIndicator'),
     activeDonorBadge: document.getElementById('activeDonorBadge'),
-    stepBtns: document.querySelectorAll('.step-btn'),
+    stepBtns: document.querySelectorAll('.step-nav .step-btn'),
     stepViews: {
       1: document.getElementById('stepContainer1'),
       2: document.getElementById('stepContainer2'),
@@ -149,6 +149,12 @@
     el.stepBtns.forEach(btn => {
       const s = parseInt(btn.dataset.step, 10);
       btn.classList.toggle('active', s === state.currentStep);
+    });
+    // Sub-tab buttons (Narrative|Risk|Budget) must not lose their active state
+    const subTabs = document.querySelectorAll('#step4SubTabs .step-btn');
+    subTabs.forEach(btn => {
+      const s = btn.dataset.subtab;
+      btn.classList.toggle('active', s === (state.step4Subtab || 'narrative'));
     });
 
     Object.keys(el.stepViews).forEach(s => {
@@ -629,6 +635,15 @@
   // ── Step 1: AI Context Drafting ─────────────────────────────────────────
   async function handleGenerateContext() {
     if (!state.activeProposalId) { alert('Create/select a proposal first.'); return; }
+    // Push current Step 1 inputs into state and persist BEFORE drafting,
+    // so the backend drafts for the country/theme the user actually typed.
+    collectStep1Inputs();
+    try {
+      await api(`/api/proposals/${state.activeProposalId}`, {
+        method: 'PUT',
+        body: JSON.stringify(state.proposal),
+      });
+    } catch (e) { /* continue anyway */ }
     el.btnAiGenerateContext.disabled = true;
     el.btnAiGenerateContext.textContent = 'Drafting context...';
     try {
@@ -1282,6 +1297,10 @@
       opt.value = newProp.id;
       opt.textContent = `${newProp.title} (${newProp.donor})`;
       el.proposalSelect.prepend(opt);
+      // Switch to the wizard workspace (landing + donor section hidden)
+      document.getElementById('landingView').style.display = 'none';
+      document.getElementById('donorCallSection').style.display = 'none';
+      document.getElementById('workspace').style.display = 'block';
       await loadProposal(newProp.id);
     } catch (e) {
       alert(`Error creating proposal: ${e.message}`);
@@ -1292,6 +1311,27 @@
     try {
       const res = await api('/api/proposals/donors');
       state.donors = res.donors || {};
+      // Populate the donor <select>: built-in donors first, then published calls
+      const sel = el.selectDonor;
+      const current = sel.value;
+      sel.innerHTML = '';
+      for (const [id, profile] of Object.entries(state.donors)) {
+        const label = (profile && profile.display_name) ? profile.display_name : id;
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = label;
+        sel.appendChild(opt);
+      }
+      try {
+        const calls = await api('/api/calls/published');
+        for (const c of (calls.published || [])) {
+          const opt = document.createElement('option');
+          opt.value = c.call_id;
+          opt.textContent = `${c.display_name} (${c.call_id})`;
+          sel.appendChild(opt);
+        }
+      } catch (e) { /* calls list optional */ }
+      if (current && [...sel.options].some(o => o.value === current)) sel.value = current;
     } catch (e) {
       console.error('Failed to load donor profiles:', e);
     }
@@ -1374,10 +1414,12 @@
     document.getElementById('btnModalIngest').addEventListener('click', async () => {
       const files = document.getElementById('modalCallFiles').files;
       if (!files || !files.length) { alert('Select at least one document.'); return; }
+      const callId = document.getElementById('modalCallId').value.trim() || `call_${Date.now().toString(36)}`;
+      const displayName = document.getElementById('modalCallName').value.trim() || callId;
       const fd = new FormData();
       for (const f of files) fd.append('files', f);
-      fd.append('call_id', `call_${Date.now().toString(36)}`);
-      fd.append('display_name', 'New Donor Call');
+      fd.append('call_id', callId);
+      fd.append('display_name', displayName);
       try {
         const res = await fetch('/api/calls/ingest', { method: 'POST', body: fd });
         const body = await res.json();
