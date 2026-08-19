@@ -230,7 +230,11 @@
     nodes.forEach((node, i) => {
       html += `
         <div class="toc-node ${node.type || 'output'}" style="position:relative;">
-          <div class="toc-node-badge">${node.type || 'STEP'}</div>
+          <div class="toc-node-badge">
+            <select class="toc-type" data-idx="${i}" style="background:transparent; border:none; color:inherit; font-size:10px; font-weight:700; text-transform:uppercase;">
+              ${['input', 'activity', 'output', 'outcome', 'impact'].map(t => `<option value="${t}" ${t === (node.type || 'output') ? 'selected' : ''}>${t}</option>`).join('')}
+            </select>
+          </div>
           <textarea class="toc-node-label" data-idx="${i}" style="width:100%; min-height:44px; background:transparent; border:none; color:inherit; font-size:12px; resize:vertical;">${esc(node.label)}</textarea>
           <button class="btn btn-sm toc-del" data-idx="${i}" style="position:absolute; top:2px; right:2px; color:var(--red); font-size:10px; padding:0 4px;">✕</button>
         </div>
@@ -246,6 +250,16 @@
       t.addEventListener('input', e => {
         const idx = parseInt(e.target.dataset.idx, 10);
         state.proposal.toc_data.nodes[idx].label = e.target.value;
+        triggerAutosave();
+      });
+    });
+
+    // Node type change
+    el.tocVisualizer.querySelectorAll('.toc-type').forEach(sel => {
+      sel.addEventListener('change', e => {
+        const idx = parseInt(e.target.dataset.idx, 10);
+        state.proposal.toc_data.nodes[idx].type = e.target.value;
+        renderToc();
         triggerAutosave();
       });
     });
@@ -266,9 +280,10 @@
 
   function addTocNode() {
     if (!state.proposal) return;
+    const type = document.getElementById('tocTypeSelect')?.value || 'output';
     state.proposal.toc_data = state.proposal.toc_data || { nodes: [], assumptions: [] };
     state.proposal.toc_data.nodes = state.proposal.toc_data.nodes || [];
-    state.proposal.toc_data.nodes.push({ type: 'output', label: 'New node — describe the step' });
+    state.proposal.toc_data.nodes.push({ type, label: 'New node — describe the step' });
     renderToc();
     triggerAutosave();
   }
@@ -293,7 +308,11 @@
     matrix.forEach((row, rIdx) => {
       html += `
         <tr data-row="${rIdx}">
-          <td class="level-cell">${esc(row.level)}</td>
+          <td class="level-cell">
+            <select class="input-select lf-level" data-row="${rIdx}" style="font-size: 11px; width: 100%;">
+              ${['GOAL', 'OUTCOME', 'OUTPUT', 'ACTIVITY'].map(lv => `<option value="${lv}" ${lv === row.level ? 'selected' : ''}>${lv}</option>`).join('')}
+            </select>
+          </td>
           <td><textarea class="editable-cell" data-row="${rIdx}" data-field="logic">${esc(row.logic)}</textarea></td>
           <td><textarea class="editable-cell" data-row="${rIdx}" data-field="indicators">${esc(row.indicators)}</textarea></td>
           <td><textarea class="editable-cell" data-row="${rIdx}" data-field="mov">${esc(row.mov)}</textarea></td>
@@ -314,6 +333,15 @@
       });
     });
 
+    // Level change
+    el.logframeBody.querySelectorAll('.lf-level').forEach(sel => {
+      sel.addEventListener('change', e => {
+        const r = parseInt(e.target.dataset.row, 10);
+        state.proposal.logframe_data.matrix[r].level = e.target.value;
+        triggerAutosave();
+      });
+    });
+
     // Delete row
     el.logframeBody.querySelectorAll('.lf-del').forEach(btn => {
       btn.addEventListener('click', e => {
@@ -327,10 +355,11 @@
 
   function addLogframeRow() {
     if (!state.proposal) return;
+    const level = document.getElementById('logframeLevelSelect')?.value || 'OUTPUT';
     state.proposal.logframe_data = state.proposal.logframe_data || {};
     state.proposal.logframe_data.matrix = state.proposal.logframe_data.matrix || [];
     state.proposal.logframe_data.matrix.push({
-      level: 'OUTPUT', logic: '', indicators: '', mov: '', assumptions: '',
+      level, logic: '', indicators: '', mov: '', assumptions: '',
     });
     renderLogframe();
     triggerAutosave();

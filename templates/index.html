@@ -145,8 +145,15 @@
               <h2 class="step-title">Theory of Change (ToC) Impact Chain</h2>
               <p class="step-subtitle">Causal transformation pathway from immediate inputs to sustainable resilience.</p>
             </div>
-            <div style="display: flex; gap: 8px;">
+            <div style="display: flex; gap: 8px; align-items: center;">
               <button id="btnAiGenerateToc" class="btn btn-primary">Generate ToC with AI</button>
+              <select id="tocTypeSelect" class="input-select" style="width: auto; font-size: 12px;">
+                <option value="input">INPUT</option>
+                <option value="activity">ACTIVITY</option>
+                <option value="output" selected>OUTPUT</option>
+                <option value="outcome">OUTCOME</option>
+                <option value="impact">IMPACT</option>
+              </select>
               <button id="btnAddTocNode" class="btn">+ Add Node</button>
               <button id="btnNextStep2" class="btn">Next: Logframe &rarr;</button>
             </div>
@@ -171,8 +178,14 @@
               <h2 class="step-title">4x4 Logical Framework (Logframe Matrix)</h2>
               <p class="step-subtitle">Fully editable matrix. Changes autosave automatically.</p>
             </div>
-            <div style="display: flex; gap: 8px;">
+            <div style="display: flex; gap: 8px; align-items: center;">
               <button id="btnAiGenerateLogframe" class="btn btn-primary">Generate Logframe with AI</button>
+              <select id="logframeLevelSelect" class="input-select" style="width: auto; font-size: 12px;">
+                <option value="GOAL">GOAL</option>
+                <option value="OUTCOME">OUTCOME</option>
+                <option value="OUTPUT" selected>OUTPUT</option>
+                <option value="ACTIVITY">ACTIVITY</option>
+              </select>
               <button id="btnAddLogframeRow" class="btn">+ Add Row</button>
               <button id="btnNextStep3" class="btn">Next: Narrative &rarr;</button>
             </div>
