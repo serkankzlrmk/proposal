@@ -219,7 +219,7 @@
     if (nodes.length === 0) {
       el.tocVisualizer.innerHTML = `
         <div style="text-align:center; padding:30px; width:100%; color:var(--text-secondary);">
-          No Theory of Change generated yet. Click <strong>"Generate ToC with AI"</strong> to create the causal pathway.
+          No Theory of Change yet. Click <strong>"Generate ToC with AI"</strong> or <strong>"+ Add Node"</strong> to build the causal pathway manually.
         </div>
       `;
       el.tocAssumptionsList.innerHTML = '<li>No assumptions recorded yet.</li>';
@@ -229,9 +229,10 @@
     let html = '';
     nodes.forEach((node, i) => {
       html += `
-        <div class="toc-node ${node.type || 'output'}">
+        <div class="toc-node ${node.type || 'output'}" style="position:relative;">
           <div class="toc-node-badge">${node.type || 'STEP'}</div>
-          <div class="toc-node-label">${esc(node.label)}</div>
+          <textarea class="toc-node-label" data-idx="${i}" style="width:100%; min-height:44px; background:transparent; border:none; color:inherit; font-size:12px; resize:vertical;">${esc(node.label)}</textarea>
+          <button class="btn btn-sm toc-del" data-idx="${i}" style="position:absolute; top:2px; right:2px; color:var(--red); font-size:10px; padding:0 4px;">✕</button>
         </div>
       `;
       if (i < nodes.length - 1) {
@@ -240,8 +241,36 @@
     });
     el.tocVisualizer.innerHTML = html;
 
+    // Inline node label edits
+    el.tocVisualizer.querySelectorAll('.toc-node-label').forEach(t => {
+      t.addEventListener('input', e => {
+        const idx = parseInt(e.target.dataset.idx, 10);
+        state.proposal.toc_data.nodes[idx].label = e.target.value;
+        triggerAutosave();
+      });
+    });
+
+    // Delete node
+    el.tocVisualizer.querySelectorAll('.toc-del').forEach(btn => {
+      btn.addEventListener('click', e => {
+        const idx = parseInt(e.target.dataset.idx, 10);
+        state.proposal.toc_data.nodes.splice(idx, 1);
+        renderToc();
+        triggerAutosave();
+      });
+    });
+
     const assumptions = toc.assumptions || [];
     el.tocAssumptionsList.innerHTML = assumptions.map(a => `<li>${esc(a)}</li>`).join('') || '<li>No assumptions recorded.</li>';
+  }
+
+  function addTocNode() {
+    if (!state.proposal) return;
+    state.proposal.toc_data = state.proposal.toc_data || { nodes: [], assumptions: [] };
+    state.proposal.toc_data.nodes = state.proposal.toc_data.nodes || [];
+    state.proposal.toc_data.nodes.push({ type: 'output', label: 'New node — describe the step' });
+    renderToc();
+    triggerAutosave();
   }
 
   // ── Step 3: 4x4 Logframe Matrix ───────────────────────────────────────────
@@ -269,6 +298,7 @@
           <td><textarea class="editable-cell" data-row="${rIdx}" data-field="indicators">${esc(row.indicators)}</textarea></td>
           <td><textarea class="editable-cell" data-row="${rIdx}" data-field="mov">${esc(row.mov)}</textarea></td>
           <td><textarea class="editable-cell" data-row="${rIdx}" data-field="assumptions">${esc(row.assumptions)}</textarea></td>
+          <td style="width: 4%;"><button class="btn btn-sm lf-del" data-row="${rIdx}" style="color:var(--red);">✕</button></td>
         </tr>
       `;
     });
@@ -283,6 +313,27 @@
         triggerAutosave();
       });
     });
+
+    // Delete row
+    el.logframeBody.querySelectorAll('.lf-del').forEach(btn => {
+      btn.addEventListener('click', e => {
+        const r = parseInt(e.target.dataset.row, 10);
+        state.proposal.logframe_data.matrix.splice(r, 1);
+        renderLogframe();
+        triggerAutosave();
+      });
+    });
+  }
+
+  function addLogframeRow() {
+    if (!state.proposal) return;
+    state.proposal.logframe_data = state.proposal.logframe_data || {};
+    state.proposal.logframe_data.matrix = state.proposal.logframe_data.matrix || [];
+    state.proposal.logframe_data.matrix.push({
+      level: 'OUTPUT', logic: '', indicators: '', mov: '', assumptions: '',
+    });
+    renderLogframe();
+    triggerAutosave();
   }
 
   // ── Step 4: Narrative Drafting ────────────────────────────────────────────
@@ -582,6 +633,10 @@
     el.step4NarrativePane.style.display = subtab === 'narrative' ? 'block' : 'none';
     el.step4RiskPane.style.display = subtab === 'risk' ? 'block' : 'none';
     el.step4BudgetPane.style.display = subtab === 'budget' ? 'block' : 'none';
+    // Per-subtab agent buttons (visible only for the active subtab)
+    document.getElementById('btnAgentNarrative').style.display = subtab === 'narrative' ? 'inline-block' : 'none';
+    document.getElementById('btnAgentRisk').style.display = subtab === 'risk' ? 'inline-block' : 'none';
+    document.getElementById('btnAgentBudget').style.display = subtab === 'budget' ? 'inline-block' : 'none';
     if (subtab === 'risk') renderStep4Risk();
     if (subtab === 'budget') renderStep4Budget();
   }
@@ -669,6 +724,48 @@
     } finally {
       el.btnAiGenerateContext.disabled = false;
       el.btnAiGenerateContext.textContent = 'Generate Context with AI';
+    }
+  }
+
+  // ── Step 4: Per-subtab agents (Narrative | Risk | Budget) ────────────────
+  async function handleAgentRisk() {
+    if (!state.activeProposalId) return;
+    const btn = document.getElementById('btnAgentRisk');
+    btn.disabled = true; btn.textContent = '🤖 Drafting risks...';
+    try {
+      const res = await api(`/api/proposal-v2/steps/4/generate-risk`, {
+        method: 'POST',
+        body: JSON.stringify({ proposal_id: state.activeProposalId }),
+      });
+      state.proposal.budget_data = state.proposal.budget_data || {};
+      state.proposal.budget_data.risks = res.risks || [];
+      renderStep4Risk();
+      triggerAutosave();
+    } catch (e) {
+      alert(`Risk agent failed: ${e.message}`);
+    } finally {
+      btn.disabled = false; btn.textContent = '🤖 Agent: Draft Risks';
+    }
+  }
+
+  async function handleAgentBudget() {
+    if (!state.activeProposalId) return;
+    const btn = document.getElementById('btnAgentBudget');
+    btn.disabled = true; btn.textContent = '🤖 Drafting budget...';
+    try {
+      const res = await api(`/api/proposal-v2/steps/4/generate-budget`, {
+        method: 'POST',
+        body: JSON.stringify({ proposal_id: state.activeProposalId }),
+      });
+      state.proposal.budget_data = state.proposal.budget_data || {};
+      state.proposal.budget_data.items = res.items || [];
+      state.proposal.budget_data.currency = res.currency || 'USD';
+      renderStep4Budget();
+      triggerAutosave();
+    } catch (e) {
+      alert(`Budget agent failed: ${e.message}`);
+    } finally {
+      btn.disabled = false; btn.textContent = '🤖 Agent: Draft Budget';
     }
   }
 
@@ -1406,6 +1503,16 @@
 
     // Step 1: AI Context Drafting
     el.btnAiGenerateContext.addEventListener('click', handleGenerateContext);
+
+    // Step 2: ToC — manual node management
+    document.getElementById('btnAddTocNode').addEventListener('click', addTocNode);
+
+    // Step 3: Logframe — manual row management
+    document.getElementById('btnAddLogframeRow').addEventListener('click', addLogframeRow);
+
+    // Step 4: per-subtab agents
+    document.getElementById('btnAgentRisk').addEventListener('click', handleAgentRisk);
+    document.getElementById('btnAgentBudget').addEventListener('click', handleAgentBudget);
 
     // Step 6: Donor Call Ingestion
     el.btnIngestCall.addEventListener('click', handleIngestCall);
