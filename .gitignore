@@ -37,3 +37,6 @@ ops/usage.jsonl
 donors/api_test_call.yaml
 donors/multi_format_call.yaml
 donors/call_mszo0ybr.yaml
+
+# NotebookLM MCP deneme kalintilari (proposal ile alakasiz)
+nblm_*.py
