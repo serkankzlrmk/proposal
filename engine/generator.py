@@ -244,10 +244,17 @@ def generate_logframe(toc_data: Dict[str, Any], context_data: Dict[str, Any], do
     theme = context_data.get("theme", "Emergency WASH & Multi-sector")
     donor_reqs = _donor_manifest_context(donor)
 
-    prompt = f"""
-    Generate a structured Logical Framework for {donor} guidelines in {country} for {theme}.
+    prompt = f"""Generate a structured Logical Framework for {donor} guidelines in {country} for {theme}.
 
-    DONOR REQUIREMENTS (from the call manifest — indicators must satisfy these):
+STRUCTURE RULES (MANDATORY):
+- EXACTLY 1 goal (impact level).
+- AT LEAST 2 outcomes (specific objectives), each with 2-4 indicators.
+- EACH outcome MUST contain AT LEAST 2 outputs, each with 2-4 indicators.
+- EACH output MUST contain 2-5 activities.
+- If you cannot fill a level with meaningful content, use realistic,
+  sector-standard phrasing for {theme} — never leave outcomes/outputs empty.
+
+DONOR REQUIREMENTS (from the call manifest — indicators must satisfy these):
     {donor_reqs}
     Return ONLY a JSON object matching this schema:
     {{

@@ -96,6 +96,26 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
 
     justification = narrative.get("justification", "") or narrative.get("program_rationale", "")
 
+    # Dynamic narrative sections: EVERYTHING in narrative_data except keys
+    # already rendered above (project_summary, justification, hum_sit, needs).
+    narrative_sections_block = ""
+    _section_titles = {
+        "project_summary": "Project Summary",
+        "humanitarian_situation": "Humanitarian Situation & Context",
+        "needs_assessment": "Needs Assessment",
+        "beneficiaries": "Beneficiary Targeting",
+        "justification": "Intervention Justification",
+    }
+    for _key, _text in (narrative or {}).items():
+        if _key in ("project_summary", "justification") or not _text or not str(_text).strip():
+            continue
+        _title = _section_titles.get(_key, str(_key).replace("_", " ").title())
+        narrative_sections_block += (
+            f"== {escape_typst(_title)}\n\n"
+            f"{escape_typst(str(_text))}\n\n"
+            f"#v(6pt)\n"
+        )
+
     logframe = proposal.get("logframe_data") or {}
     matrix = logframe.get("matrix") or [
         {
@@ -308,6 +328,8 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
 #v(4pt)
 == Humanitarian Situation & Needs Assessment
 """ + escape_typst(hum_sit or needs or f"Comprehensive assessment conducted in {country} targeting acute vulnerability and protection risks.") + """
+
+""" + narrative_sections_block + """
 
 #v(8pt)
 
