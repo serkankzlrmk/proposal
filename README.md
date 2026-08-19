@@ -1,111 +1,112 @@
 # Proposal Studio
 
-Sightline projesinin **hibe teklifi (grant proposal) üretim pipeline'ı**. Bir donor
-çağrısını (call) okuyup, o çağrının kurallarına göre insani yardım proposal'ı üretir;
-her adımda insan onayı ve düzenleme hakkı korunur.
+The **grant proposal production pipeline** for the Sightline project. It reads a
+donor call (call), extracts its requirements, and produces a humanitarian grant
+proposal that follows those rules — with human approval and editing at every step.
 
-> Sightline reposundan bağımsız geliştirilir; entegrasyon notu:
+> Developed independently from the Sightline repo; integration note:
 > `docs/EVIDENCE_BRIDGE.md`.
 
 ---
 
-## Ne Yapar
+## What It Does
 
-Uçtan uca akış:
+End-to-end flow:
 
 ```
-Donor call belgeleri (pdf/docx/md)
+Donor call documents (pdf/docx/md)
         │
         ▼
-Call Ingestion ──► özet + gereklilikler çıkarılır ──► insan onayı
+Call Ingestion ──► summary + requirements extracted ──► human approval
         │                                                  │
         ▼                                                  ▼
-  Proposal oluşturma ◄── donors/<call_id>.yaml (manifest, engine otomatik yükler)
+  Proposal creation ◄── donors/<call_id>.yaml (manifest, auto-loaded by engine)
         │
         ▼
-  Adım 1  Context & Targeting      (AI taslak + elle düzenleme)
-  Adım 2  Theory of Change         (AI üretim + elle node ekle/sil)
-  Adım 3  4x4 Logframe             (AI üretim + elle satır ekle/sil, GOAL/OUTCOME/OUTPUT/ACTIVITY)
-  Adım 4  Narrative / Risk / Bütçe (3 alt sekme, her birinde ayrı agent)
-  Adım 5  Blind Verifier + PDF     (deterministik skor + Typst PDF)
+  Step 1  Context & Targeting      (AI draft + manual editing)
+  Step 2  Theory of Change         (AI generation + manual node add/remove)
+  Step 3  4x4 Logframe             (AI generation + manual row add/remove, GOAL/OUTCOME/OUTPUT/ACTIVITY)
+  Step 4  Narrative / Risk / Budget (3 sub-tabs, each with its own agent)
+  Step 5  Blind Verifier + PDF     (deterministic scoring + Typst PDF)
 ```
 
-Skorlama **deterministiktir** (LLM karar vermez): donor manifest'teki kurallara göre
-5 kriter üzerinden hesaplanır ve hard eligibility ihlali otomatik ret üretir.
+Scoring is **deterministic** (the LLM never decides): it is computed over 5
+criteria from the donor manifest, and a hard eligibility violation produces an
+automatic rejection.
 
 ---
 
-## Kurulum & Çalıştırma
+## Setup & Run
 
 ```bash
-# Bağımlılıklar (Python 3.11)
+# Dependencies (Python 3.11)
 uv venv --python 3.11
 uv pip install --python .venv/bin/python -r requirements.txt
 
-# Sunucu
+# Server
 PYTHONPATH="" VIRTUAL_ENV=$(pwd)/.venv .venv/bin/python app.py
 # → http://127.0.0.1:5002
 
-# Test
+# Tests
 .venv/bin/python -m pytest tests/ -q
 ```
 
-Gereksinimler: `flask`, `flask-cors`, `httpx`, `python-dotenv`, `typst`, `pymupdf`,
+Requirements: `flask`, `flask-cors`, `httpx`, `python-dotenv`, `typst`, `pymupdf`,
 `requests`, `langchain`, `pypdf`.
 
 ---
 
-## Proje Yapısı
+## Project Structure
 
 ```
-app.py                      Flask sunucusu (:5002) + blueprint kayıtları
-config.py                   Ortam ayarları (port, LLM endpoint, key'ler)
-db.py                       SQLite katmanı: proposal CRUD, step kilidi (FSM),
-                            audit log (proposal_reviews), call draft tablosu
+app.py                      Flask server (:5002) + blueprint registration
+config.py                   Environment settings (port, LLM endpoint, keys)
+db.py                       SQLite layer: proposal CRUD, step locking (FSM),
+                            audit log (proposal_reviews), call draft table
 
 blueprints/
-  proposal_api.py           Proposal CRUD, AI üretim uçları, full-summary,
-                            PDF export (eligibility kapısı), advisor chat
-  call_ingest_api.py        Call yükleme (çoklu dosya), draft onay/red, brief
+  proposal_api.py           Proposal CRUD, AI generation endpoints, full-summary,
+                            PDF export (eligibility gate), advisor chat
+  call_ingest_api.py        Call upload (multi-file), draft approve/reject, brief
   step3_logframe.py         Logframe analyze (SMART), lock, generate
-  step4_budget_risk.py      Risk matrisi / bütçe analizi, lock, alt-sekme agent'ları
+  step4_budget_risk.py      Risk matrix / budget analysis, lock, sub-tab agents
 
 engine/
-  models.py                 Pydantic şemaları: DonorManifest, LogframeIndicator,
+  models.py                 Pydantic schemas: DonorManifest, LogframeIndicator,
                             RiskMatrixItem, BudgetItem, PseaCommitments
-  yaml_rules.py             Donor manifest yükleyici + deterministik skor motoru
-                            (5 kriter, hard gates, lineer bütçe cezası)
-  donor_resolver.py         Donor id çözümleme (call-ingested ↔ builtin)
-  donor_rules.py            Eski Python donor profilleri (geri uyumluluk)
-  call_ingest.py            Call belge → gereklilik çıkarımı, anti-halüsinasyon
-                            gate doğrulama, manifest üretimi
-  generator.py              ToC / Logframe / Narrative üretimi (manifest-aware),
-                            yapısal logframe → matrix projeksiyonu
-  smart_parser.py           SMART gösterge doğrulama + deterministik güçlendirme
-  advisor.py                Etkileşimli danışman (small-talk hızlı yolu + LLM)
-  advisor_context.py        Danışman bağlam şeması (superset)
-  verifier.py               Blind verifier (LLM-as-a-judge, ayrı model)
-  evidence.py               Sightline köprüsü: ReliefWeb/HDX tool'larını
-                            kod kopyalamadan çalışma zamanında kullanır
+  yaml_rules.py             Donor manifest loader + deterministic scoring engine
+                            (5 criteria, hard gates, linear budget penalty)
+  donor_resolver.py         Donor id resolution (call-ingested ↔ builtin)
+  donor_rules.py            Legacy Python donor profiles (backward compat)
+  call_ingest.py            Call document → requirement extraction, anti-hallucination
+                            gate verification, manifest generation
+  generator.py              ToC / Logframe / Narrative generation (manifest-aware),
+                            structured logframe → matrix projection
+  smart_parser.py           SMART indicator validation + deterministic hardening
+  advisor.py                Interactive advisor (small-talk fast path + LLM)
+  advisor_context.py        Advisor context schema (superset)
+  verifier.py               Blind verifier (LLM-as-a-judge, separate model)
+  evidence.py               Sightline bridge: uses ReliefWeb/HDX tools at runtime
+                            WITHOUT copying the code
 
-typst_engine/compiler.py    Typst PDF üretimi (narrative, logframe, risk,
-                            bütçe, gerçek skor bloğu)
-donors/*.yaml               Donor manifestleri (OCHA, USAID, EU, Generic +
-                            call-ingested olanlar)
-ops/tracing.py              LLM kullanım ledger'ı (JSONL: token, maliyet, süre)
-templates/ + static/        SPA (6 adımlı wizard + landing + donor call bölümü)
+typst_engine/compiler.py    Typst PDF generation (narrative, logframe, risk,
+                            budget, real score block)
+donors/*.yaml               Donor manifests (OCHA, USAID, EU, Generic +
+                            call-ingested ones)
+ops/tracing.py              LLM usage ledger (JSONL: tokens, cost, latency)
+templates/ + static/        SPA (5-step wizard + landing + donor call section)
 docs/
-  EVIDENCE_BRIDGE.md        Sightline entegrasyon/taşıma notu
-  SYSTEM_DESIGN.md          Sistem tasarımı
-  ARCHITECTURE.md           Mimari ilkeler
-  BACKEND_DESIGN.md         Backend tasarım notları
+  EVIDENCE_BRIDGE.md        Sightline integration/migration note
+  SYSTEM_DESIGN.md          System design
+  ARCHITECTURE.md           Architecture principles
+  BACKEND_DESIGN.md         Backend design notes
 ```
 
 ---
 
-## Donor Manifest Sistemi
+## Donor Manifest System
 
-Her donor, kök seviyede deklaratif bir YAML'dir; yeni donor eklemek = 1 dosya:
+Each donor is a declarative root-level YAML; adding a donor = 1 file:
 
 ```yaml
 donor_id: ocha_cbpf
@@ -118,65 +119,66 @@ hard_eligibility_gates:
 mandatory_sections: [Executive Summary, Context, ...]
 ```
 
-Skor motoru (`engine/yaml_rules.py`) bu manifest'i yükler:
+The scoring engine (`engine/yaml_rules.py`) loads this manifest:
 
-- **5 kriter** — section_coverage (30), source_citations (25), smart_criteria (20),
-  donor_keywords (15), budget_alignment (10) — toplam 100
-- **Hard gates** — ihlal edilen kota/koşul varsa skor ne olursa olsun
-  `AUTOMATIC_REJECTION`; PDF export 403 ile kilitlenir
-- **Lineer bütçe cezası** — overhead cap'i aşan kısım için `10 − (aşım × 5)`
-- **Zero-crash** — eksik/bozuk kural asla patlamaz; 0 puan + `WARNING_MISSING_RULE`
+- **5 criteria** — section_coverage (30), source_citations (25), smart_criteria (20),
+  donor_keywords (15), budget_alignment (10) — total 100
+- **Hard gates** — a violated quota/condition produces `AUTOMATIC_REJECTION`
+  regardless of score; PDF export is locked with 403
+- **Linear budget penalty** — `10 − (overage × 5)` for overhead above the cap
+- **Zero-crash** — a missing/broken rule never crashes; 0 points + `WARNING_MISSING_RULE`
 
-## Call Ingestion (İnsan-Onaylı Kural Çıkarımı)
+## Call Ingestion (Human-Approved Rule Extraction)
 
-1. **Yükleme** — pdf/docx/md, **çoklu dosya** (guidelines + form + annex tek seferde)
-2. **Çıkarım** — özet + gereklilikler + deadline + bütçe kuralı (TRY/tavan) + hard gates
-3. **Anti-halüsinasyon** — LLM'in iddia ettiği her gate, belge metninde **kanıtlanmak
-   zorundadır**; kanıt yoksa manifest'e girmez (deterministik doğrulama)
-4. **İnsan onayı** — brief ("ne diyor, ne istiyor, ne yapılmalı") + Publish/Reject
-5. **Manifest** — `donors/<call_id>.yaml` yazılır, engine bir sonraki istekte otomatik
-   kullanır (glob tabanlı dinamik yükleme)
+1. **Upload** — pdf/docx/md, **multi-file** (guidelines + form + annex in one go)
+2. **Extraction** — summary + requirements + deadline + budget rule (TRY/cap) + hard gates
+3. **Anti-hallucination** — every gate claimed by the LLM MUST be evidenced in the
+   document text; without evidence it never enters the manifest (deterministic check)
+4. **Human approval** — brief ("what it says, what it wants, what to do") + Publish/Reject
+5. **Manifest** — written to `donors/<call_id>.yaml`; the engine picks it up
+   automatically on the next request (glob-based dynamic loading)
 
-## Sightline Evidence Köprüsü
+## Sightline Evidence Bridge
 
-`engine/evidence.py` Sightline'ın `reliefweb_api/` tool'larını (ReliefWeb sitrep
-arama, HDX ülke/mülteci/IDP verisi) **kod kopyalamadan** çalışma zamanında çağırır:
+`engine/evidence.py` calls Sightline's `reliefweb_api/` tools (ReliefWeb sitrep
+search, HDX country/refugee/IDP data) at runtime **without copying the code**:
 
-- Sightline root'u `sys.path`'e eklenir, modüller paket olarak import edilir
-- HDX key'i Sightline'ın kendi `.env`'inden okunur (bu repoya kopyalanmaz)
-- Toplanan kanıt `[ref: SIGHTLINE_*]` alıntılarıyla prompt'a girer; alıntılar
-  citation registry'de grounded sayılır (source_citations skoru)
-- Sightline yoksa/kapalıysa tüm çağrılar `None` döner — pipeline asla kırılmaz
+- Sightline's root is added to `sys.path`; modules are imported as a package
+- The HDX key is read from Sightline's own `.env` (never copied into this repo)
+- Collected evidence enters the prompt as `[ref: SIGHTLINE_*]` citations; those
+  citations count as grounded in the citation registry (source_citations score)
+- If Sightline is missing/unavailable, every call returns `None` — the pipeline
+  never breaks
 
-Taşıma anında yapılacaklar: `docs/EVIDENCE_BRIDGE.md` (checklist).
+What to do at migration time: `docs/EVIDENCE_BRIDGE.md` (checklist).
 
 ---
 
 ## Frontend
 
-Tek sayfa (SPA): landing (proposal listesi + silme) → "+ New" pop-up
-(published call / hazır donor / yeni call yükleme) → 5 adımlı wizard + sonda
-ayrı Donor Call bölümü. Sağ altta 💬 floating danışman (tıklayınca pop-up).
-Her adımda AI üretimi ve elle düzenleme birlikte çalışır; alt sekmelerin
-(Risk, Bütçe) kendi agent butonları vardır.
+Single-page app: landing (proposal list + delete) → "+ New" pop-up
+(published call / ready donor / upload new call) → 5-step wizard + a separate
+Donor Call section at the end. A 💬 floating advisor sits bottom-right
+(pop-up on click). Every step supports both AI generation and manual editing;
+the sub-tabs (Risk, Budget) have their own agent buttons.
 
-## LLM Kullanımı (sadece gereken yerlerde)
+## LLM Usage (only where needed)
 
-- Call gereklilik çıkarımı ve brief üretimi
-- ToC / Logframe / Narrative taslak üretimi
-- Risk / Bütçe taslak üretimi (alt-sekme agent'ları)
-- Blind verifier (ayrı model, düşünce zinciri verilmez)
-- Danışman sohbet
+- Call requirement extraction and brief generation
+- ToC / Logframe / Narrative draft generation
+- Risk / Budget draft generation (sub-tab agents)
+- Blind verifier (separate model, chain-of-thought never shared)
+- Advisor chat
 
-Tüm LLM çağrıları `ops/usage.jsonl`'e yazılır (token, maliyet, gecikme). Üretim
-hattının **kritik kararları** (skor, eligibility, gate doğrulama) her zaman
-deterministik koddadır.
+Every LLM call is written to `ops/usage.jsonl` (tokens, cost, latency). The
+pipeline's **critical decisions** (score, eligibility, gate verification) always
+live in deterministic code.
 
-## Test Kapsamı
+## Test Coverage
 
-| Dosya | Konu |
+| File | Topic |
 |---|---|
-| `test_yaml_rules.py` | Manifest yükleme, skorlama, hard gates, bütçe cezası |
-| `test_call_ingest.py` | Çoklu format çıkarım, anti-halüsinasyon, brief, API akışı |
-| `test_step3_logframe.py` | Yapısal logframe, SMART parser, lock (FSM) |
-| `test_proposal.py` | Uçtan uca akış, blind verifier, PDF |
+| `test_yaml_rules.py` | Manifest loading, scoring, hard gates, budget penalty |
+| `test_call_ingest.py` | Multi-format extraction, anti-hallucination, brief, API flow |
+| `test_step3_logframe.py` | Structured logframe, SMART parser, lock (FSM) |
+| `test_proposal.py` | End-to-end flow, blind verifier, PDF |
