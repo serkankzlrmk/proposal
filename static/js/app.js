@@ -286,18 +286,27 @@
   }
 
   // ── Step 4: Narrative Drafting ────────────────────────────────────────────
+  const FALLBACK_SECTIONS = [
+    { key: 'project_summary', title: 'Project Summary', max_chars: 4000, description: 'Concise overview of the proposed intervention.' },
+    { key: 'humanitarian_situation', title: 'Humanitarian Situation & Context', max_chars: 4000, description: 'Describe the acute humanitarian triggers and displacement.' },
+    { key: 'needs_assessment', title: 'Needs Assessment', max_chars: 4000, description: 'Detail sectoral gaps and Sphere deficits.' },
+    { key: 'beneficiaries', title: 'Beneficiary Targeting', max_chars: 3000, description: 'Describe who is reached and why.' },
+    { key: 'justification', title: 'Intervention Justification', max_chars: 3000, description: 'Why this intervention, why now.' },
+  ];
+
   function renderNarrative() {
     const donorKey = state.proposal?.donor || 'OCHA_CBPF';
     const profile = state.donors[donorKey] || { sections: [] };
     const narrative = state.proposal?.narrative_data || {};
+    const sections = (profile.sections && profile.sections.length ? profile.sections : FALLBACK_SECTIONS);
 
-    if (!state.activeNarrativeTab && profile.sections.length > 0) {
-      state.activeNarrativeTab = profile.sections[0].key;
+    if (!state.activeNarrativeTab && sections.length > 0) {
+      state.activeNarrativeTab = sections[0].key;
     }
 
     // Render Tabs
     let tabsHtml = '';
-    profile.sections.forEach(sec => {
+    sections.forEach(sec => {
       const active = sec.key === state.activeNarrativeTab ? 'active' : '';
       const text = narrative[sec.key] || '';
       const isOver = text.length > sec.max_chars;
@@ -310,7 +319,7 @@
     el.narrativeTabsHeader.innerHTML = tabsHtml;
 
     // Render Active Section Textarea
-    const curSec = profile.sections.find(s => s.key === state.activeNarrativeTab) || profile.sections[0];
+    const curSec = sections.find(s => s.key === state.activeNarrativeTab) || sections[0];
     if (!curSec) {
       el.narrativeSectionsContainer.innerHTML = '<div style="color:var(--text-secondary);">No sections available.</div>';
       return;
@@ -1223,12 +1232,7 @@
         opt.textContent = `${p.title || 'Untitled'} (${p.donor} • ${p.country || 'Global'})`;
         el.proposalSelect.appendChild(opt);
       });
-
-      if (list.length > 0) {
-        await loadProposal(list[0].id);
-      } else {
-        await createNewProposal();
-      }
+      // No auto-open: the landing view drives proposal selection
     } catch (e) {
       console.error('Failed to load proposals list:', e);
     }
@@ -1240,6 +1244,11 @@
       state.activeProposalId = id;
       state.proposal = res.proposal;
       el.proposalSelect.value = id;
+
+      // Always switch to the wizard workspace when opening a proposal
+      document.getElementById('landingView').style.display = 'none';
+      document.getElementById('donorCallSection').style.display = 'none';
+      document.getElementById('workspace').style.display = 'block';
 
       populateStep1();
       setStep(state.proposal.step || 1);
@@ -1460,6 +1469,8 @@
   async function init() {
     setupEventListeners();
     await loadDonors();
+    // Fill the header proposal dropdown (needed by the select-based flow)
+    await loadProposalsList();
     // Landing view first: existing proposals (view/delete) + New CTA
     await renderLanding();
   }
