@@ -1,0 +1,64 @@
+/* Component refinements are layered here so product behavior stays independent. */
+.btn { border-radius: 10px; border-color: var(--line-soft); background: rgba(255,255,255,.8); font-weight: 620; letter-spacing: -.01em; transition: transform .18s var(--ease-premium), box-shadow .18s var(--ease-premium), background .18s ease, border-color .18s ease; }
+.btn:hover { transform: translateY(-1px); border-color: var(--line-medium); box-shadow: 0 8px 20px rgba(20,39,65,.09); }
+.btn:active { transform: translateY(0) scale(.985); }
+.btn-primary { color: #fff; border-color: rgba(2,132,199,.16); background: linear-gradient(135deg, var(--brand-500), var(--brand-600)); box-shadow: 0 8px 22px rgba(14,165,233,.22), inset 0 1px 0 rgba(255,255,255,.2); }
+.btn-primary:hover { background: linear-gradient(135deg, #18afea, var(--brand-600)); box-shadow: 0 11px 26px rgba(14,165,233,.28), inset 0 1px 0 rgba(255,255,255,.2); }
+.input-text, .input-textarea, .input-select { border-color: var(--line-soft); border-radius: 11px; background-color: rgba(255,255,255,.78); box-shadow: inset 0 1px 2px rgba(20,39,65,.025); transition: border-color .18s ease, box-shadow .18s ease, background .18s ease; }
+.input-text:hover, .input-textarea:hover, .input-select:hover { border-color: var(--line-medium); background-color: rgba(255,255,255,.94); }
+.input-text:focus, .input-textarea:focus, .input-select:focus { border-color: rgba(14,165,233,.44); background-color: #fff; box-shadow: 0 0 0 4px rgba(14,165,233,.1), 0 8px 20px rgba(20,39,65,.05); }
+.glass-card { border-color: rgba(255,255,255,.88); border-radius: 18px; background: linear-gradient(145deg, rgba(255,255,255,.83), rgba(250,252,255,.68)); box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255,255,255,.92); backdrop-filter: blur(22px); }
+.modal-card, .advisor-popup { --bg-card: rgba(255,255,255,.94); color: var(--ink-950); border-color: rgba(255,255,255,.88); border-radius: 20px; box-shadow: var(--shadow-float); backdrop-filter: blur(28px); }
+
+.btn-danger { color: #fff; border-color: rgba(220,38,38,.2); background: linear-gradient(135deg, #ef4444, #dc2626); box-shadow: 0 8px 20px rgba(220,38,38,.2); }
+.icon-button { display: inline-grid; place-items: center; width: 31px; height: 31px; padding: 0; border: 1px solid var(--line-soft); border-radius: 9px; color: var(--ink-400); background: rgba(255,255,255,.68); cursor: pointer; transition: color .18s ease, border-color .18s ease, background .18s ease, transform .18s var(--ease-premium); }
+.icon-button:hover { color: var(--danger-500); border-color: rgba(220,38,38,.18); background: rgba(254,242,242,.9); transform: translateY(-1px); }
+
+.toast-region { position: fixed; z-index: 300; top: calc(var(--header-height) + 14px); right: 18px; display: grid; gap: 9px; width: min(380px, calc(100vw - 36px)); pointer-events: none; }
+.toast { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding: 11px 12px; border: 1px solid rgba(255,255,255,.86); border-radius: 14px; color: var(--ink-700); background: rgba(255,255,255,.9); box-shadow: var(--shadow-card); backdrop-filter: blur(20px); font-size: 11.5px; pointer-events: auto; animation: toast-in .24s var(--ease-premium); }
+.toast-mark { display: grid; place-items: center; width: 23px; height: 23px; border-radius: 8px; color: var(--brand-700); background: var(--ice-100); font-weight: 750; }
+.toast-success .toast-mark { color: var(--success-500); background: rgba(22,163,74,.09); }
+.toast-danger .toast-mark { color: var(--danger-500); background: rgba(220,38,38,.09); }
+.toast button { width: 25px; height: 25px; border: 0; border-radius: 7px; color: var(--ink-400); background: transparent; cursor: pointer; font-size: 18px; }
+.toast-leaving { opacity: 0; transform: translateX(12px); transition: opacity .18s ease, transform .18s ease; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-8px) scale(.98); } }
+
+.activity-region { position: fixed; z-index: 290; bottom: 18px; left: 18px; display: grid; align-content: end; gap: 8px; width: min(370px, calc(100vw - 36px)); pointer-events: none; }
+.activity-card { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; overflow: hidden; padding: 9px 11px 11px; border: 1px solid rgba(255,255,255,.9); border-radius: 14px; color: var(--ink-700); background: rgba(255,255,255,.92); box-shadow: 0 12px 34px rgba(20,39,65,.14); backdrop-filter: blur(24px); pointer-events: auto; animation: activity-in .24s var(--ease-premium); }
+.activity-orbit { position: relative; display: grid; place-items: center; width: 27px; height: 27px; border-radius: 9px; color: var(--brand-600); background: var(--ice-100); }
+.activity-orbit::before { content: ''; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: activity-spin .75s linear infinite; }
+.activity-copy { display: grid; min-width: 0; gap: 2px; }
+.activity-copy strong { overflow: hidden; color: var(--ink-900); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.activity-copy small { overflow: hidden; color: var(--ink-500); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.activity-time { min-width: 34px; color: var(--ink-400); font-size: 9px; font-variant-numeric: tabular-nums; text-align: right; }
+.activity-progress { position: absolute; right: 0; bottom: 0; left: 0; height: 3px; background: rgba(14,165,233,.09); }
+.activity-progress i { display: block; width: 42%; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--brand-400), var(--brand-600)); animation: activity-progress 1.35s ease-in-out infinite; }
+.activity-card.is-success .activity-orbit { color: var(--success-500); background: rgba(22,163,74,.09); }
+.activity-card.is-success .activity-orbit::before { content: '✓'; width: auto; height: auto; border: 0; animation: none; font-weight: 800; }
+.activity-card.is-success .activity-progress i { width: 100%; animation: none; background: var(--success-500); }
+.activity-card.is-danger .activity-orbit { color: var(--danger-500); background: rgba(220,38,38,.09); }
+.activity-card.is-danger .activity-orbit::before { content: '!'; width: auto; height: auto; border: 0; animation: none; font-weight: 850; }
+.activity-card.is-danger .activity-progress i { width: 100%; animation: none; background: var(--danger-500); }
+.activity-leaving { opacity: 0; transform: translateY(8px) scale(.98); transition: opacity .22s ease, transform .22s ease; }
+.btn[aria-busy='true'], button[aria-busy='true'] { cursor: progress; opacity: .78; }
+.btn[aria-busy='true']::before { content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 7px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -1px; animation: activity-spin .7s linear infinite; }
+@keyframes activity-in { from { opacity: 0; transform: translateY(9px) scale(.98); } }
+@keyframes activity-spin { to { transform: rotate(360deg); } }
+@keyframes activity-progress { 0% { transform: translateX(-110%); } 55% { transform: translateX(105%); } 100% { transform: translateX(240%); } }
+
+.generation-guidance { display: flex; align-items: flex-start; gap: 11px; margin: 12px 0 14px; padding: 12px 14px; border: 1px solid rgba(14,165,233,.16); border-radius: 13px; color: var(--ink-600); background: linear-gradient(135deg, rgba(240,249,255,.82), rgba(255,255,255,.72)); font-size: 11px; line-height: 1.55; }
+.generation-guidance strong { display: block; margin-bottom: 1px; color: var(--ink-800); font-size: 11.5px; }
+.generation-guidance-icon { display: grid; flex: 0 0 auto; place-items: center; width: 23px; height: 23px; margin-top: 1px; border-radius: 8px; color: var(--brand-700); background: rgba(14,165,233,.1); font-size: 11px; font-weight: 800; font-family: ui-serif, Georgia, serif; }
+
+@media (max-width: 640px) {
+  .activity-region { right: 10px; bottom: 76px; left: 10px; width: auto; }
+  .activity-card { padding-inline: 11px; }
+}
+
+.confirmation-overlay { z-index: 250; }
+.confirmation-card { width: min(420px, calc(100vw - 32px)); padding: 26px; text-align: center; }
+.confirmation-icon { display: grid; place-items: center; width: 46px; height: 46px; margin: 0 auto 15px; border-radius: 15px; color: var(--success-500); background: rgba(22,163,74,.09); font-size: 18px; font-weight: 800; }
+.confirmation-icon.danger { color: var(--danger-500); background: rgba(220,38,38,.09); }
+.confirmation-card h2 { color: var(--ink-950); font-size: 20px; letter-spacing: -.03em; }
+.confirmation-card p { max-width: 330px; margin: 8px auto 0; color: var(--ink-500); font-size: 12px; line-height: 1.6; }
+.confirmation-actions { display: flex; justify-content: center; gap: 9px; margin-top: 22px; }

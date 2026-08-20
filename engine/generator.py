@@ -109,7 +109,13 @@ def append_references(references: List[Dict[str, Any]], sources: List[Dict[str, 
     return registry
 
 
-def _call_llm(prompt: str, system_prompt: str = "", temperature: float = 0.3, action: str = "generate") -> str:
+def _call_llm(
+    prompt: str,
+    system_prompt: str = "",
+    temperature: float = 0.3,
+    action: str = "generate",
+    timeout_seconds: float = 45.0,
+) -> str:
     """Call OpenRouter or LLM provider with fallback heuristics.
 
     Every call is traced to ops/usage.jsonl (LLM-Ops ledger, Waku pattern):
@@ -135,7 +141,7 @@ def _call_llm(prompt: str, system_prompt: str = "", temperature: float = 0.3, ac
     }
     t0 = time.time()
     try:
-        with httpx.Client(timeout=45.0) as client:
+        with httpx.Client(timeout=timeout_seconds) as client:
             resp = client.post(f"{LLM_BASE_URL}/chat/completions", headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()

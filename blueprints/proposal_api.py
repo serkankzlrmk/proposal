@@ -5,6 +5,7 @@ proposal/blueprints/proposal_api.py — Flask Blueprint for Proposal Design Pipe
 import io
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from flask import Blueprint, jsonify, request, send_file
 
 try:
@@ -47,6 +48,59 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 proposal_api_bp = Blueprint("proposal_api", __name__, url_prefix="/api/proposals")
+_evidence_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="proposal-evidence")
+
+
+def _manifest_country(manifest) -> str:
+    meta = getattr(manifest, "meta", None) or {}
+    return str(meta.get("country") or "").strip()
+
+
+def _deterministic_context_draft(prop, ctx, manifest=None):
+    """Create an evidence-safe editable context when the AI provider is down."""
+    country = str(ctx.get("country") or prop.get("country") or _manifest_country(manifest) or "the target geography").strip()
+    theme = str(ctx.get("theme") or prop.get("theme") or "multi-sector programming").strip()
+    display_name = str(getattr(manifest, "display_name", "") or prop.get("donor") or "the donor call").strip()
+    keywords = [str(item).strip() for item in (getattr(manifest, "mandatory_keywords", None) or []) if str(item).strip()]
+    focus_terms = [item for item in keywords if item.lower() not in {"psea", "sadd"}][:4]
+    focus = ", ".join(focus_terms) or theme
+    requirements = list((getattr(manifest, "meta", None) or {}).get("requirements") or [])
+    mandatory_sections = list(getattr(manifest, "mandatory_sections", None) or [])
+    section_hint = f" ({', '.join(mandatory_sections[:4])})" if mandatory_sections else ""
+
+    title_focus = focus_terms[0] if focus_terms else theme
+    title = f"{country}: {title_focus.title()} Programme"
+    title = " ".join(title.split()[:12])
+
+    situation = (
+        f"The approved {display_name} identifies {focus} as priority concerns in {country}. "
+        f"The context should define the affected groups and geographic concentration using verified local evidence, "
+        f"while maintaining a {theme} and rights-based lens."
+    )
+    needs = (
+        f"The proposal needs to demonstrate clear, evidenced service and capacity gaps related to {focus}. "
+        f"The response should connect measurable results to donor-required content"
+        f"{section_hint}, include safeguarding and PSEA controls where applicable, "
+        f"and validate beneficiary figures before submission."
+    )
+
+    beneficiaries = ctx.get("beneficiaries") or {}
+    draft = {
+        "title": title,
+        "country": country if country != "the target geography" else "",
+        "theme": theme,
+        "humanitarian_situation": situation,
+        "needs_assessment": needs,
+        "beneficiaries_total": beneficiaries.get("total") or 0,
+        "beneficiaries_displaced": beneficiaries.get("idp_refugee") or 0,
+        "generation_note": (
+            "AI provider unavailable; drafted locally from the approved donor manifest. "
+            "Add verified local evidence and confirm beneficiary figures."
+        ),
+    }
+    if requirements:
+        draft["donor_requirements_used"] = requirements[:8]
+    return draft
 
 
 @proposal_api_bp.route("/donors", methods=["GET"])
@@ -95,6 +149,13 @@ def new_proposal():
     country = data.get("country", "")
     donor = data.get("donor", "OCHA_CBPF")
     theme = data.get("theme", "Multi-sector")
+
+    if not country and donor:
+        try:
+            loader = YamlDonorRuleLoader()
+            country = _manifest_country(loader.load(resolve_donor_id(donor, loader)))
+        except Exception as e:
+            logger.debug("Proposal country could not be inferred from donor manifest: %s", e)
 
     context_data = data.get("context_data", {
         "country": country,
@@ -178,13 +239,15 @@ def handle_generate_context(proposal_id: str):
 
     # ── Manifest constraints (call-specific: TRY budget, deadline, gates) ──
     manifest_block = ""
+    manifest = None
     try:
         from engine.yaml_rules import YamlDonorRuleLoader
         from engine.donor_resolver import resolve_donor_id
 
         loader = YamlDonorRuleLoader()
-        manifest = loader.load(resolve_donor_id(donor))
+        manifest = loader.load(resolve_donor_id(donor, loader))
         if manifest is not None:
+            country = country or _manifest_country(manifest)
             manifest_block = (
                 f"Donor: {manifest.display_name}\n"
                 f"Currency: {manifest.currency} | Budget max: {manifest.budget_max or 'n/a'} | "
@@ -200,12 +263,16 @@ def handle_generate_context(proposal_id: str):
     try:
         from engine.evidence import collect_evidence, evidence_to_prompt, ascii_country, country_code_for
 
-        ev = collect_evidence(
+        future = _evidence_executor.submit(
+            collect_evidence,
             country=ascii_country(country),
             theme=theme,
             country_code=country_code_for(country),
         )
+        ev = future.result(timeout=8.0)
         evidence_block = evidence_to_prompt(ev, max_chars=2500)
+    except FuturesTimeoutError:
+        logger.info("Evidence collection exceeded 8s; continuing with donor manifest context")
     except Exception as e:
         logger.debug("Evidence collection skipped: %s", e)
 
@@ -230,7 +297,12 @@ def handle_generate_context(proposal_id: str):
 
     from engine.generator import _call_llm
 
-    raw = _call_llm(prompt, temperature=0.3, action="generate_context")
+    raw = _call_llm(
+        prompt,
+        temperature=0.3,
+        action="generate_context",
+        timeout_seconds=15.0,
+    )
     if raw:
         try:
             clean = raw.strip()
@@ -248,7 +320,30 @@ def handle_generate_context(proposal_id: str):
         except Exception as e:
             logger.warning("Context draft unparseable: %s", e)
 
-    return jsonify({"error": "AI draft failed; fill the fields manually."}), 502
+    parsed = _deterministic_context_draft(prop, ctx, manifest)
+    new_ctx = dict(ctx)
+    for key in (
+        "country", "theme", "humanitarian_situation", "needs_assessment",
+        "beneficiaries_total", "beneficiaries_displaced", "generation_note",
+        "donor_requirements_used",
+    ):
+        if key in parsed and parsed[key] not in (None, ""):
+            new_ctx[key] = parsed[key]
+    update_proposal(
+        proposal_id,
+        {
+            "context_data": new_ctx,
+            "title": parsed.get("title") or prop.get("title"),
+            "country": parsed.get("country") or prop.get("country"),
+        },
+    )
+    return jsonify({
+        "status": "ok",
+        "generation_mode": "deterministic_fallback",
+        "context_data": new_ctx,
+        "title": parsed.get("title") or prop.get("title"),
+        "notice": parsed["generation_note"],
+    })
 
 
 @proposal_api_bp.route("/<proposal_id>/generate-toc", methods=["POST"])

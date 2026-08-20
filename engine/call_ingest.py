@@ -140,7 +140,12 @@ def extract_requirements(text: str) -> Dict[str, Any]:
         "deadline.\n\n" + _EXTRACTION_SCHEMA_HINT +
         "\n\nCALL TEXT (truncated):\n" + (text or "")[:50_000]
     )
-    raw = _call_llm(prompt, temperature=0.1, action="call_extract")
+    raw = _call_llm(
+        prompt,
+        temperature=0.1,
+        action="call_extract",
+        timeout_seconds=20.0,
+    )
     if raw:
         try:
             clean = raw.strip()
@@ -160,12 +165,16 @@ def extract_requirements(text: str) -> Dict[str, Any]:
 
 
 def _regex_extract(text: str) -> Dict[str, Any]:
-    """Deterministic fallback extraction (offline-safe, testable)."""
+    """Deterministic fallback extraction (offline-safe, evidence-based)."""
     low = (text or "").lower()
     keywords: List[str] = []
-    for kw in ("psea", "sadd", "gbv", "sphere standards", "do no harm",
-               "accountability to affected populations", "protection mainstreaming",
-               "humanitarian principles", "cluster coordination", "localization"):
+    for kw in (
+        "psea", "sadd", "gbv", "sphere standards", "do no harm",
+        "accountability to affected populations", "protection mainstreaming",
+        "humanitarian principles", "cluster coordination", "localization",
+        "child, early and forced marriages", "cefm", "gender equality",
+        "rights-based", "multi-sectoral collaboration", "capacity-building",
+    ):
         if kw in low:
             keywords.append(kw)
 
@@ -183,27 +192,178 @@ def _regex_extract(text: str) -> Dict[str, Any]:
     if m:
         gates["min_displaced_ratio"] = float(m.group(1)) / 100.0
 
-    m = re.search(r"(?:overhead|indirect)[^.\n]{0,40}?(\d{1,2}(?:\.\d)?)\s*%", low)
+    m = re.search(
+        r"(?:overhead|indirect|support\s+cost)[^.\n]{0,40}?(?:max(?:imum)?\s*)?(\d{1,2}(?:\.\d)?)\s*%",
+        low,
+    )
     budget_cap = float(m.group(1)) if m else 7.0
 
-    m = re.search(r"(?:deadline|closing|submission)[^.\n]{0,30}?(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})", low)
-    deadline = m.group(1) if m else "unknown"
+    deadline = _extract_deadline(text)
+    currency, budget_max = _extract_budget_ceiling(text)
+    country = _extract_country(text)
+
+    duration_match = re.search(
+        r"(?:maximum|max(?:imum)?\.?|up\s+to)\s+(\d{1,3})\s+months?",
+        low,
+    )
+    max_duration_months = int(duration_match.group(1)) if duration_match else None
+
+    sections = _extract_application_sections(text)
+    requirements = [f"Priority language: {keyword}" for keyword in keywords]
+    if deadline != "unknown":
+        requirements.append(f"Submission deadline: {deadline}")
+    if budget_max is not None:
+        requirements.append(f"Maximum budget: {currency} {budget_max:,.0f}")
+    if max_duration_months is not None:
+        requirements.append(f"Maximum programme duration: {max_duration_months} months")
+    if re.search(r"applications?\s+must\s+be\s+submitted\s+in\s+english", low):
+        requirements.append("Applications must be submitted in English")
+    if re.search(r"(?:copy of provisions of )?legal status", low):
+        requirements.append("Proof of the organisation's legal status is required")
+    if "annual report" in low and "audit report" in low:
+        requirements.append("Latest annual report and audit report are required")
+    reference_match = re.search(r"provide\s+(\d+)\s+references?", low)
+    if reference_match:
+        requirements.append(f"Provide {reference_match.group(1)} references")
+    if "list of indicators" in low:
+        requirements.append("A completed list of indicators is required")
+    if "proposed budget" in low or "budget template" in low:
+        requirements.append("The donor budget template is required")
+
+    title_match = re.search(
+        r"(?im)^\s*((?:grant|funding|open)\s+call[^\n]{0,160})$",
+        text or "",
+    )
+    title = re.sub(r"\s+", " ", title_match.group(1)).strip() if title_match else "Uploaded donor call"
+    donor = next((name for name in ("UNFPA", "UNICEF", "OCHA", "ECHO", "UNHCR", "USAID") if name.lower() in low), "The donor")
+    focus = ""
+    if "child, early, and forced marriages" in low or "cefm" in low:
+        focus = " It focuses on preventing child, early and forced marriages and strengthening civil society capacity."
 
     summary = (
-        "Donor call extracted deterministically (no LLM): "
-        + f"{len(keywords)} priority keywords, {len(gates)} hard gates detected."
+        f"{title}. {donor} call requirements were extracted locally from the uploaded source documents.{focus} "
+        f"Detected {len(requirements)} explicit requirements and {len(gates)} evidenced eligibility rules."
         if text else "No extractable text (empty PDF?)."
     )
     return {
         "summary": summary,
-        "requirements": [f"Keyword requirement: {k}" for k in keywords],
+        "requirements": requirements,
         "deadline": deadline,
+        "currency": currency,
+        "budget_max": budget_max,
+        "max_duration_months": max_duration_months,
+        "country": country,
         "budget_cap_percent": budget_cap,
         "min_source_ratio": 0.75,
         "mandatory_keywords": keywords,
-        "sections": {"mandatory": ["project_summary", "humanitarian_situation", "needs_assessment"]},
+        "sections": {"mandatory": sections or ["project_summary", "needs_assessment", "monitoring_and_evaluation"]},
         "hard_gates": gates,
+        "extraction_mode": "deterministic",
     }
+
+
+_MONTHS = {
+    "january": 1, "february": 2, "march": 3, "april": 4,
+    "may": 5, "june": 6, "july": 7, "august": 8,
+    "september": 9, "october": 10, "november": 11, "december": 12,
+}
+
+
+def _extract_country(text: str) -> str:
+    """Best-effort country extraction for offline proposal initialization."""
+    low = (text or "").lower()
+    aliases = (
+        (("türkiye", "turkiye", "turkey"), "Türkiye"),
+        (("south sudan",), "South Sudan"),
+        (("sudan",), "Sudan"),
+        (("syrian arab republic", "syria"), "Syria"),
+        (("ukraine",), "Ukraine"),
+        (("afghanistan",), "Afghanistan"),
+        (("somalia",), "Somalia"),
+        (("ethiopia",), "Ethiopia"),
+        (("yemen",), "Yemen"),
+        (("lebanon",), "Lebanon"),
+        (("jordan",), "Jordan"),
+    )
+    for names, canonical in aliases:
+        if any(re.search(rf"\b{re.escape(name)}\b", low) for name in names):
+            return canonical
+    return ""
+
+
+def _extract_deadline(text: str) -> str:
+    """Return the submission deadline as ISO YYYY-MM-DD when evidenced."""
+    source = text or ""
+    candidates = []
+    date_patterns = (
+        re.compile(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b"),
+        re.compile(
+            r"\b(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})\b",
+            re.I,
+        ),
+    )
+    for pattern in date_patterns:
+        for match in pattern.finditer(source):
+            day = int(match.group(1))
+            month = int(match.group(2)) if match.group(2).isdigit() else _MONTHS[match.group(2).lower()]
+            year = int(match.group(3))
+            year = year + 2000 if year < 100 else year
+            context = source[max(0, match.start() - 180):match.end() + 80].lower()
+            score = 0
+            if "deadline for submissions" in context or "deadline for submission" in context:
+                score += 10
+            if "send their submission" in context or "applications must be submitted" in context:
+                score += 9
+            if "deadline" in context:
+                score += 4
+            if "submit" in context or "closing" in context:
+                score += 3
+            if "proposal" in context:
+                score += 2
+            if any(term in context for term in ("additional information", "clarification", "queries", "questions")):
+                score -= 20
+            if any(term in context for term in ("issue date", "review of", "notification of results")):
+                score -= 8
+            candidates.append((score, match.start(), f"{year:04d}-{month:02d}-{day:02d}"))
+    if not candidates:
+        return "unknown"
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    return candidates[0][2] if candidates[0][0] > 0 else "unknown"
+
+
+def _extract_budget_ceiling(text: str) -> tuple[str, Optional[float]]:
+    """Extract a donor budget ceiling without treating dates as money."""
+    source = text or ""
+    match = re.search(
+        r"(?:maximum|max(?:imum)?\.?|up\s+to)\s*(?:budget\s*)?"
+        r"(USD|EUR|GBP|TRY|TL)\s*([0-9][0-9.,\s]{2,})",
+        source,
+        re.I,
+    )
+    if not match:
+        match = re.search(
+            r"(?:budget|grant)[^\n]{0,50}?(USD|EUR|GBP|TRY|TL)\s*([0-9][0-9.,\s]{2,})",
+            source,
+            re.I,
+        )
+    if not match:
+        return "USD", None
+    currency = "TRY" if match.group(1).upper() == "TL" else match.group(1).upper()
+    digits = re.sub(r"[^0-9]", "", match.group(2))
+    return currency, float(digits) if digits else None
+
+
+def _extract_application_sections(text: str) -> List[str]:
+    """Collect proposal-template headings that become scoring sections."""
+    source = text or ""
+    headings = re.findall(r"(?im)^\s*([DEF]\.\d+\s+[^\n]{3,100}|Section\s+F\.\s+References)\s*$", source)
+    sections: List[str] = []
+    for heading in headings:
+        label = re.sub(r"^(?:[DEF]\.\d+|Section\s+F\.)\s*", "", heading, flags=re.I)
+        slug = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
+        if slug and slug not in sections:
+            sections.append(slug)
+    return sections
 
 
 # ── Evidence-gated extraction (anti-hallucination layer) ───────────────────
@@ -314,6 +474,7 @@ def build_manifest_draft(call_id: str, display_name: str, extracted: Dict[str, A
         "meta": {
             "source": "call_ingest",
             "deadline": str(extracted.get("deadline", "unknown")),
+            "country": str(extracted.get("country") or ""),
             "requirements": _list(extracted.get("requirements")),
             "created_at": time.time(),
         },

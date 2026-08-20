@@ -5,44 +5,85 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sightline — Proposal Design Pipeline & GMS Grant Engine</title>
   <link rel="stylesheet" href="/static/css/proposal.css">
+  <link rel="stylesheet" href="/static/css/design/tokens.css">
+  <link rel="stylesheet" href="/static/css/design/shell.css">
+  <link rel="stylesheet" href="/static/css/design/components.css">
+  <link rel="stylesheet" href="/static/css/design/workspace.css">
+  <link rel="stylesheet" href="/static/css/design/donor-intelligence.css">
+  <link rel="stylesheet" href="/static/css/design/responsive.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📝</text></svg>">
 </head>
 <body>
 
   <a class="skip-link" href="#workspace">Skip to workspace</a>
 
+  <div class="ambient-backdrop" aria-hidden="true">
+    <span class="ambient-orb ambient-orb-one"></span>
+    <span class="ambient-orb ambient-orb-two"></span>
+    <span class="ambient-grid"></span>
+  </div>
+
   <!-- Top App Header — Liquid Glass -->
   <header class="app-header">
     <div class="brand-group">
-      <span class="brand-badge">SIGHTLINE</span>
-      <span class="brand-title">Grant Management Proposal Engine</span>
-      <span id="activeDonorBadge" class="donor-badge">OCHA_CBPF</span>
-    </div>
-
-    <div class="header-actions">
-      <span id="autosaveIndicator" class="autosave-status saved">
-        <span class="dot"></span>
-        <span>All changes saved</span>
-      </span>
-      <select id="proposalSelect" class="input-select" style="width: 220px;">
-        <option value="">-- Select or Create Proposal --</option>
-      </select>
-      <button id="btnNewProposal" class="btn btn-sm btn-primary">+ New Proposal</button>
+      <button id="btnSightlineHome" class="brand-home sightline-home" type="button" aria-label="Return to Sightline" data-shell-action="sightline-home">
+        <img class="brand-logo" src="/static/images/sightline-signal.webp" alt="" aria-hidden="true">
+        <span class="brand-copy">
+          <span class="brand-title">Sightline</span>
+        </span>
+      </button>
+      <span class="product-divider" aria-hidden="true"></span>
+      <button id="btnProposalHome" class="module-home" type="button" aria-label="Proposal Studio home">
+        <strong>Proposal Studio</strong>
+      </button>
+      <button id="btnDonorLibrary" class="module-home" type="button" aria-label="Donor Intelligence workspace">
+        <strong>Donor Intelligence</strong>
+      </button>
     </div>
   </header>
 
   <!-- Landing View: existing proposals (view/delete) + New Proposal CTA -->
   <main class="main-layout" id="landingView" style="display:block;">
-    <section class="workspace-pane" style="max-width: 900px; margin: 0 auto; width: 100%;">
-      <div class="step-header-area" style="margin-bottom: 16px;">
-        <div>
-          <h2 class="step-title">Proposals</h2>
-          <p class="step-subtitle">Pick an existing proposal to continue, or start a new one from a donor call.</p>
+    <section class="landing-shell">
+      <div class="landing-hero">
+        <div class="hero-copy">
+          <div class="section-kicker"><span></span> Grant intelligence workspace</div>
+          <h1>Turn complex donor calls into<br><em>submission-ready proposals.</em></h1>
+          <p>One focused workspace for evidence, programme logic, compliance and publication—built around deterministic donor rules.</p>
+          <div class="hero-actions">
+            <button id="btnLandingNew" class="btn btn-primary btn-lg"><span aria-hidden="true">＋</span> Create proposal</button>
+            <span class="hero-assurance"><span class="assurance-mark">✓</span> Human-approved rules</span>
+          </div>
         </div>
-        <button id="btnLandingNew" class="btn btn-primary">+ New Proposal</button>
+        <div class="hero-system-card" aria-label="Proposal workflow summary">
+          <div class="system-card-head">
+            <span>Pipeline integrity</span>
+            <span class="live-pill"><span></span> Operational</span>
+          </div>
+          <div class="system-score-row">
+            <strong>5</strong>
+            <span>deterministic<br>scoring criteria</span>
+            <div class="system-ring" aria-hidden="true"><span>100</span></div>
+          </div>
+          <div class="system-flow">
+            <span>CALL</span><i></i><span>DESIGN</span><i></i><span>VERIFY</span><i></i><span>PDF</span>
+          </div>
+          <div class="system-rule"><span class="shield-icon">◆</span><span><strong>Rules stay sovereign.</strong><br>AI drafts. The engine decides.</span></div>
+        </div>
       </div>
-      <div id="landingProposalsList">
-        <div style="color:var(--text-secondary); font-size:13px;">Loading proposals...</div>
+
+      <div class="proposal-library">
+        <div class="library-heading">
+          <div>
+            <div class="section-kicker"><span></span> Workspace</div>
+            <h2>Your proposals</h2>
+            <p>Continue exactly where you left off.</p>
+          </div>
+          <div class="library-legend"><span class="status-dot"></span> Autosaved locally</div>
+        </div>
+        <div id="landingProposalsList" class="proposal-grid" aria-live="polite">
+          <div class="proposal-loading"><span></span><span></span><span></span></div>
+        </div>
       </div>
     </section>
   </main>
@@ -56,21 +97,35 @@
       <!-- Step Navigation Bar -->
       <nav class="step-nav">
         <button class="step-btn active" data-step="1">
-          <span class="step-num">1</span> Context & Targeting
+          <span class="step-num">01</span><span class="step-copy"><strong>Context</strong><small>Evidence & targeting</small></span>
         </button>
         <button class="step-btn" data-step="2">
-          <span class="step-num">2</span> Theory of Change
+          <span class="step-num">02</span><span class="step-copy"><strong>Theory of Change</strong><small>Impact pathway</small></span>
         </button>
         <button class="step-btn" data-step="3">
-          <span class="step-num">3</span> 4x4 Logframe Matrix
+          <span class="step-num">03</span><span class="step-copy"><strong>Logframe</strong><small>Results matrix</small></span>
         </button>
         <button class="step-btn" data-step="4">
-          <span class="step-num">4</span> Narrative, Risk & Budget
+          <span class="step-num">04</span><span class="step-copy"><strong>Design</strong><small>Narrative & budget</small></span>
         </button>
         <button class="step-btn" data-step="5">
-          <span class="step-num">5</span> Verifier Audit & PDF
+          <span class="step-num">05</span><span class="step-copy"><strong>Verify</strong><small>Audit & publication</small></span>
         </button>
       </nav>
+
+      <div class="workspace-context-bar">
+        <div class="workspace-identity">
+          <span>Active proposal</span>
+          <strong id="workspaceProposalTitle">Untitled proposal</strong>
+        </div>
+        <div class="workspace-context-actions">
+          <span id="activeDonorBadge" class="donor-badge"><span class="status-dot"></span>DONOR CALL</span>
+          <span id="autosaveIndicator" class="autosave-status saved">
+            <span class="dot"></span>
+            <span>All changes saved</span>
+          </span>
+        </div>
+      </div>
 
       <!-- Step Content Area -->
       <div class="step-content">
@@ -79,8 +134,9 @@
         <div id="stepContainer1" class="step-view">
           <div class="step-header-area">
             <div>
+              <div class="section-kicker"><span></span> Step 01 · Foundation</div>
               <h2 class="step-title">Project Context & Donor Specifications</h2>
-              <p class="step-subtitle">Define target country, donor guidelines (OCHA, USAID, EU), and vulnerable beneficiary quotas.</p>
+              <p class="step-subtitle">Define the operating context, target geography and vulnerable beneficiary profile for this donor call.</p>
             </div>
             <div style="display: flex; gap: 8px;">
               <button id="btnAiGenerateContext" class="btn btn-primary">Generate Context with AI</button>
@@ -101,11 +157,9 @@
               </div>
 
               <div class="form-group">
-                <label class="form-label" for="selectDonor">Target Donor Framework</label>
-                <select id="selectDonor" class="input-select">
-                  <option value="OCHA_CBPF">UN OCHA CBPF (GPPi 8+3 Harmonized)</option>
-                  <option value="USAID_BHA">USAID BHA (Emergency Application Guidelines - EAG)</option>
-                  <option value="EU_PRAG">EU EuropeAid / ECHO (PRAG Guidelines)</option>
+                <label class="form-label" for="selectDonor">Donor Framework <span class="field-origin">From uploaded call</span></label>
+                <select id="selectDonor" class="input-select" disabled>
+                  <option value="">Upload a donor call to begin</option>
                 </select>
               </div>
 
@@ -142,6 +196,7 @@
         <div id="stepContainer2" class="step-view" style="display: none;">
           <div class="step-header-area">
             <div>
+              <div class="section-kicker"><span></span> Step 02 · Strategy</div>
               <h2 class="step-title">Theory of Change (ToC) Impact Chain</h2>
               <p class="step-subtitle">Causal transformation pathway from immediate inputs to sustainable resilience.</p>
             </div>
@@ -175,6 +230,7 @@
         <div id="stepContainer3" class="step-view" style="display: none;">
           <div class="step-header-area">
             <div>
+              <div class="section-kicker"><span></span> Step 03 · Results architecture</div>
               <h2 class="step-title">4x4 Logical Framework (Logframe Matrix)</h2>
               <p class="step-subtitle">Fully editable matrix. Changes autosave automatically.</p>
             </div>
@@ -214,6 +270,7 @@
         <div id="stepContainer4" class="step-view" style="display: none;">
           <div class="step-header-area">
             <div>
+              <div class="section-kicker"><span></span> Step 04 · Programme design</div>
               <h2 class="step-title">Narrative, Risk Matrix & Itemized Budget</h2>
               <p class="step-subtitle">Donor narrative sections, 5x5 severity risk matrix, and budget with overhead cap checks.</p>
             </div>
@@ -235,6 +292,13 @@
           </div>
 
           <div id="step4NarrativePane">
+            <div class="generation-guidance" role="note" aria-label="Narrative generation information">
+              <span class="generation-guidance-icon" aria-hidden="true">i</span>
+              <span>
+                <strong>Narrative preparation may take several minutes.</strong>
+                You may continue working in other sections. Once complete, the draft will be saved automatically and will be available when you return to this step.
+              </span>
+            </div>
             <div id="narrativeTabsHeader" class="narrative-tabs">
               <!-- Section tabs rendered dynamically -->
             </div>
@@ -253,6 +317,7 @@
         <div id="stepContainer5" class="step-view" style="display: none;">
           <div class="step-header-area">
             <div>
+              <div class="section-kicker"><span></span> Step 05 · Assurance</div>
               <h2 class="step-title">Blind Verifier Audit & Publication</h2>
               <p class="step-subtitle">Independent compliance audit and sub-10ms Typst PDF document generation.</p>
             </div>
@@ -303,41 +368,55 @@
 
   </main>
 
-  <!-- Donor Call Section (separate, after the wizard — not a wizard step) -->
+  <!-- Donor Intelligence (separate product area — not a proposal step) -->
   <section class="main-layout" id="donorCallSection" style="display:none;">
-    <div class="workspace-pane" style="max-width: 900px; margin: 0 auto; width: 100%;">
-      <div class="step-header-area" style="margin-bottom: 16px;">
+    <div class="donor-intelligence-shell">
+      <div class="donor-intelligence-header">
         <div>
-          <h2 class="step-title">Donor Call</h2>
-          <p class="step-subtitle">Upload the donor call documents — the system extracts what the call says & wants, you review & approve.</p>
+          <div class="section-kicker"><span></span> Source of truth</div>
+          <h2>Donor Intelligence</h2>
+          <p>Review what the call says, what the donor expects and which rules govern the proposal.</p>
         </div>
+        <button id="btnBackToProposals" class="btn">← Back to proposals</button>
       </div>
 
-      <div class="glass-card">
-        <div class="form-group">
-          <label class="form-label" for="callFileInput">Donor Call Documents (PDF, DOCX, MD — multiple allowed)</label>
-          <input type="file" id="callFileInput" class="input-text" accept=".pdf,.docx,.md,.markdown,.txt" multiple style="padding: 8px;">
-        </div>
-        <div class="form-grid">
-          <div class="form-group">
-            <label class="form-label" for="callIdInput">Call ID (donor_id)</label>
-            <input type="text" id="callIdInput" class="input-text" placeholder="e.g. unfpa_turkiye_cefm">
+      <div class="donor-intelligence-layout">
+        <aside class="call-library-panel">
+          <div class="call-library-heading">
+            <div><span class="panel-label">Your calls</span><p>Uploaded source documents</p></div>
+            <button id="btnToggleCallUpload" class="icon-button" type="button" aria-label="Upload another call" title="Upload another call">＋</button>
           </div>
-          <div class="form-group">
-            <label class="form-label" for="callNameInput">Display Name</label>
-            <input type="text" id="callNameInput" class="input-text" placeholder="e.g. UNFPA Türkiye CEFM Grant Call">
+
+          <div id="callUploadPanel" class="call-upload-panel" hidden>
+            <div class="form-group">
+              <label class="form-label" for="callFileInput">Call documents</label>
+              <input type="file" id="callFileInput" class="input-text" accept=".pdf,.docx,.md,.markdown,.txt" multiple>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="callIdInput">Call ID <span class="optional-label">Optional</span></label>
+              <input type="text" id="callIdInput" class="input-text" placeholder="Agent creates one if empty">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="callNameInput">Display name <span class="optional-label">Optional</span></label>
+              <input type="text" id="callNameInput" class="input-text" placeholder="Agent names the call if empty">
+            </div>
+            <button id="btnIngestCall" class="btn btn-primary btn-block">Extract donor intelligence</button>
           </div>
-        </div>
-        <button id="btnIngestCall" class="btn btn-primary" style="margin-top: 8px;">Ingest Call & Extract Requirements</button>
-      </div>
 
-      <!-- Extraction result (brief + documents + requirements + manifest draft) -->
-      <div id="callIngestResult" style="display: none; margin-top: 16px;"></div>
+          <div id="callDraftsList" class="call-library-list" aria-live="polite">
+            <div class="proposal-loading"><span></span><span></span></div>
+          </div>
+        </aside>
 
-      <!-- Draft list -->
-      <div class="glass-card" style="margin-top: 16px;">
-        <h3 style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px;">Ingested Call Drafts</h3>
-        <div id="callDraftsList"><!-- Rendered dynamically --></div>
+        <main class="call-intelligence-panel">
+          <div id="callIngestResult" class="call-intelligence-detail">
+            <div class="intelligence-empty">
+              <span class="intelligence-empty-mark">◇</span>
+              <h3>Select a donor call</h3>
+              <p>Its summary, requirements and approved rule set will appear here.</p>
+            </div>
+          </div>
+        </main>
       </div>
     </div>
   </section>
@@ -363,46 +442,40 @@
     </div>
   </div>
 
-  <!-- New Proposal Modal: pick a published call, upload a new one, or use a ready donor -->
+  <!-- New Proposal Modal: every proposal starts from uploaded source documents -->
   <div id="newProposalModal" class="modal-overlay" style="display:none;">
-    <div class="modal-card">
+    <div class="modal-card call-start-modal">
       <div class="step-header-area" style="margin-bottom: 12px;">
         <div>
-          <h2 class="step-title">New Proposal</h2>
-          <p class="step-subtitle">Start from a donor call (recommended) or a ready donor framework.</p>
+          <div class="section-kicker"><span></span> New proposal</div>
+          <h2 class="step-title">Upload the donor call</h2>
+          <p class="step-subtitle">The proposal begins from the donor's source documents. You will review the extracted rules before writing.</p>
         </div>
         <button class="btn btn-sm" id="btnCloseNewProposal">✕</button>
       </div>
 
-      <!-- Published calls -->
-      <h3 style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px;">Published Donor Calls</h3>
-      <div id="publishedCallsList" style="max-height: 180px; overflow-y: auto; margin-bottom: 12px;">
-        <div style="color:var(--text-secondary); font-size:12.5px;">Loading...</div>
+      <div class="call-source-note">
+        <span>01</span><p><strong>Upload</strong> guidelines, forms and annexes together.</p>
+        <span>02</span><p><strong>Review</strong> the summary and extracted donor rules.</p>
+        <span>03</span><p><strong>Approve</strong> the rules and start the proposal.</p>
       </div>
 
-      <!-- Ready donors -->
-      <h3 style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px;">Ready Donor Frameworks</h3>
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom: 12px;">
-        <button class="btn btn-sm ready-donor" data-donor="OCHA_CBPF">OCHA CBPF</button>
-        <button class="btn btn-sm ready-donor" data-donor="USAID_BHA">USAID BHA</button>
-        <button class="btn btn-sm ready-donor" data-donor="EU_PRAG">EU PRAG</button>
-        <button class="btn btn-sm ready-donor" data-donor="generic">Generic</button>
+      <div class="call-file-drop">
+        <span class="call-file-icon">↥</span>
+        <div><strong>Choose donor call documents</strong><small>PDF, DOCX, Markdown or TXT · multiple files supported</small></div>
+        <input type="file" id="modalCallFiles" class="input-text" accept=".pdf,.docx,.md,.markdown,.txt" multiple>
       </div>
-
-      <!-- Upload new call -->
-      <h3 style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px;">Or Upload a New Call</h3>
-      <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-        <input type="file" id="modalCallFiles" class="input-text" accept=".pdf,.docx,.md,.markdown,.txt" multiple style="flex:1; padding:8px;">
-        <button class="btn btn-sm btn-primary" id="btnModalIngest">Ingest</button>
+      <div class="form-grid call-identifiers">
+        <div class="form-group"><label class="form-label" for="modalCallId">Call ID <span class="optional-label">Optional</span></label><input type="text" id="modalCallId" class="input-text" placeholder="Agent creates one if empty"></div>
+        <div class="form-group"><label class="form-label" for="modalCallName">Display name <span class="optional-label">Optional</span></label><input type="text" id="modalCallName" class="input-text" placeholder="Agent names the call if empty"></div>
       </div>
-      <div class="form-grid" style="grid-template-columns: 1fr 1.6fr;">
-        <input type="text" id="modalCallId" class="input-text" placeholder="Call ID (e.g. unfpa_turkiye_cefm)" style="padding:8px;">
-        <input type="text" id="modalCallName" class="input-text" placeholder="Display name (e.g. UNFPA Türkiye CEFM)" style="padding:8px;">
-      </div>
+      <button class="btn btn-primary btn-lg btn-block" id="btnModalIngest">Extract donor intelligence</button>
     </div>
   </div>
 
+  <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+
   <!-- Main Vanilla JS Coordinator -->
-  <script src="/static/js/app.js"></script>
+  <script type="module" src="/static/js/app.js"></script>
 </body>
 </html>

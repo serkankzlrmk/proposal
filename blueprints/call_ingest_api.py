@@ -18,6 +18,7 @@ user's explicit publish call (vision: human actively co-authors the system).
 import io
 import json
 import logging
+import re
 import sqlite3
 import time
 import uuid
@@ -32,6 +33,7 @@ try:
         extract_requirements,
         build_manifest_draft,
         save_manifest,
+        DONORS_DIR,
     )
     from engine.models import DonorManifest
 except ImportError:
@@ -41,6 +43,7 @@ except ImportError:
         extract_requirements,
         build_manifest_draft,
         save_manifest,
+        DONORS_DIR,
     )
     from proposal.engine.models import DonorManifest
 
@@ -91,34 +94,41 @@ def _generate_brief(corpus: str, extracted: Dict[str, Any], draft: Dict[str, Any
     LLM-generated (with the extraction summary + manifest draft as context);
     falls back to a deterministic structured brief when the LLM is unavailable.
     """
-    try:
-        from engine.generator import _call_llm
+    extraction_used_fallback = extracted.get("extraction_mode") == "deterministic"
+    if not extraction_used_fallback:
+        try:
+            from engine.generator import _call_llm
 
-        reqs = "\n".join(f"- {r}" for r in (extracted.get("requirements") or [])[:12])
-        gates = ", ".join(draft.get("hard_eligibility_gates") or {}) or "none"
-        prompt = f"""
-        Write a concise, human-friendly BRIEF of this donor call for a proposal writer.
-        Structure it as:
-        ## What this call is about
-        (2-3 sentences: who is funding, what problem, where, how much, deadline)
+            reqs = "\n".join(f"- {r}" for r in (extracted.get("requirements") or [])[:12])
+            gates = ", ".join(draft.get("hard_eligibility_gates") or {}) or "none"
+            prompt = f"""
+            Write a concise, human-friendly BRIEF of this donor call for a proposal writer.
+            Structure it as:
+            ## What this call is about
+            (2-3 sentences: who is funding, what problem, where, how much, deadline)
 
-        ## What the donor wants
-        (bullet list: mandatory requirements, hard gates, budget rules, sections)
+            ## What the donor wants
+            (bullet list: mandatory requirements, hard gates, budget rules, sections)
 
-        ## What you must do
-        (3-5 concrete next steps for the proposal writer)
+            ## What you must do
+            (3-5 concrete next steps for the proposal writer)
 
-        Call summary: {extracted.get('summary', '')}
-        Requirements: {reqs}
-        Hard gates: {gates}
-        Deadline: {extracted.get('deadline', 'unknown')}
-        Budget cap: {draft.get('overhead_cap_percent', 'n/a')}% overhead | Currency: {draft.get('currency', 'USD')} | Max: {draft.get('budget_max', 'n/a')}
-        """
-        raw = _call_llm(prompt, temperature=0.2, action="call_brief")
-        if raw and raw.strip():
-            return raw.strip()[:6000]
-    except Exception as e:
-        logger.warning("Brief generation failed: %s", e)
+            Call summary: {extracted.get('summary', '')}
+            Requirements: {reqs}
+            Hard gates: {gates}
+            Deadline: {extracted.get('deadline', 'unknown')}
+            Budget cap: {draft.get('overhead_cap_percent', 'n/a')}% overhead | Currency: {draft.get('currency', 'USD')} | Max: {draft.get('budget_max', 'n/a')}
+            """
+            raw = _call_llm(
+                prompt,
+                temperature=0.2,
+                action="call_brief",
+                timeout_seconds=20.0,
+            )
+            if raw and raw.strip():
+                return raw.strip()[:6000]
+        except Exception as e:
+            logger.warning("Brief generation failed: %s", e)
 
     # Deterministic fallback
     reqs = "\n".join(f"- {r}" for r in (extracted.get("requirements") or [])[:10]) or "- (none extracted)"
@@ -129,6 +139,59 @@ def _generate_brief(corpus: str, extracted: Dict[str, Any], draft: Dict[str, Any
         f"- Overhead cap: {draft.get('overhead_cap_percent', 'n/a')}% | Currency: {draft.get('currency', 'USD')} | Budget max: {draft.get('budget_max', 'n/a')}\n\n"
         f"## What you must do\n- Review the extracted requirements above and publish the manifest to start writing."
     )
+
+
+def _slug_call_id(value: str) -> str:
+    """Normalize an agent/user supplied call identifier for manifest use."""
+    slug = re.sub(r"[^a-z0-9]+", "_", (value or "").lower()).strip("_")
+    return slug[:72] or f"call_{uuid.uuid4().hex[:8]}"
+
+
+def _generate_call_identity(corpus: str, extracted: Dict[str, Any]) -> Dict[str, str]:
+    """Name an uploaded call when the user leaves identity fields empty."""
+    summary = str(extracted.get("summary") or "").strip()
+    if extracted.get("extraction_mode") != "deterministic":
+        try:
+            from engine.generator import _call_llm
+
+            raw = _call_llm(
+                f"""
+                Identify this donor call from the extracted document context.
+                Return ONLY JSON:
+                {{"display_name": "concise official donor/call name", "call_id": "lowercase_snake_case_id"}}
+                Do not invent a donor when it is not evidenced. Keep display_name under 80 characters.
+
+                Summary: {summary[:1200]}
+                Document opening: {corpus[:1800]}
+                """,
+                temperature=0.1,
+                action="call_identity",
+                timeout_seconds=20.0,
+            )
+            if raw:
+                clean = raw.strip()
+                if clean.startswith("```"):
+                    clean = clean.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+                parsed = json.loads(clean)
+                name = str(parsed.get("display_name") or "").strip()[:80]
+                call_id = _slug_call_id(str(parsed.get("call_id") or name))
+                if name:
+                    return {"display_name": name, "call_id": call_id}
+        except Exception as e:
+            logger.warning("Call identity generation failed: %s", e)
+
+    # Deterministic fallback still derives the label from the uploaded content.
+    call_title_match = re.search(
+        r"(?im)^\s*((?:grant|funding|open)\s+call[^\n]{0,160})$",
+        corpus,
+    )
+    first_content_line = next((
+        line.strip() for line in corpus.splitlines()
+        if line.strip() and not line.startswith("=====") and len(line.strip()) >= 8
+    ), "")
+    call_title = re.sub(r"\s+", " ", call_title_match.group(1)).strip() if call_title_match else ""
+    name = (call_title or first_content_line or summary.split(".", 1)[0] or "Uploaded Donor Call")[:80]
+    return {"display_name": name, "call_id": _slug_call_id(name)}
 
 
 @call_ingest_bp.route("/ingest", methods=["POST"])
@@ -149,8 +212,8 @@ def ingest_call():
     if not files:
         return jsonify({"error": "At least one document required (fields 'files' or 'file')"}), 400
 
-    call_id = (request.form.get("call_id") or "").strip() or f"call_{uuid.uuid4().hex[:8]}"
-    display_name = (request.form.get("display_name") or "").strip() or f"Custom Donor Call ({call_id})"
+    requested_call_id = (request.form.get("call_id") or "").strip()
+    requested_display_name = (request.form.get("display_name") or "").strip()
 
     # Concatenate all documents into one corpus
     corpus_parts = []
@@ -175,6 +238,9 @@ def ingest_call():
 
     corpus = "\n\n".join(corpus_parts)
     extracted = extract_requirements(corpus)
+    identity = _generate_call_identity(corpus, extracted) if not requested_call_id or not requested_display_name else {}
+    call_id = _slug_call_id(requested_call_id or identity.get("call_id", ""))
+    display_name = requested_display_name or identity.get("display_name") or f"Donor Call ({call_id})"
     draft = build_manifest_draft(call_id, display_name, extracted)
 
     # ── Human-readable brief: what the call says & wants (LLM, fallback) ────
@@ -300,6 +366,60 @@ def update_draft(draft_id: str):
     finally:
         conn.close()
     return jsonify({"status": "updated", "draft_id": draft_id})
+
+
+@call_ingest_bp.route("/drafts/<draft_id>", methods=["DELETE"])
+def delete_draft(draft_id: str):
+    """Delete an unused call and its published manifest, if any.
+
+    Calls referenced by a proposal are protected because removing their YAML
+    manifest would silently change the deterministic scoring contract.
+    """
+    _init_table()
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT id, call_id, display_name, status FROM call_drafts WHERE id = ?",
+            (draft_id,),
+        ).fetchone()
+        if not row:
+            return jsonify({"error": "Call not found"}), 404
+
+        in_use = conn.execute(
+            "SELECT COUNT(*) AS total FROM proposals WHERE donor = ?",
+            (row["call_id"],),
+        ).fetchone()["total"]
+        if in_use:
+            return jsonify({
+                "error": f"This call is used by {in_use} proposal(s) and cannot be deleted.",
+                "code": "CALL_IN_USE",
+                "proposal_count": in_use,
+            }), 409
+
+        other_published = conn.execute(
+            "SELECT COUNT(*) AS total FROM call_drafts "
+            "WHERE call_id = ? AND status = 'published' AND id != ?",
+            (row["call_id"], draft_id),
+        ).fetchone()["total"]
+
+        with conn:
+            conn.execute("DELETE FROM call_drafts WHERE id = ?", (draft_id,))
+    finally:
+        conn.close()
+
+    manifest_removed = False
+    if row["status"] == "published" and not other_published:
+        manifest_path = DONORS_DIR / f"{_slug_call_id(row['call_id'])}.yaml"
+        if manifest_path.is_file():
+            manifest_path.unlink()
+            manifest_removed = True
+
+    return jsonify({
+        "status": "deleted",
+        "draft_id": draft_id,
+        "call_id": row["call_id"],
+        "manifest_removed": manifest_removed,
+    })
 
 
 @call_ingest_bp.route("/drafts/<draft_id>/publish", methods=["POST"])

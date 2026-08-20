@@ -12,6 +12,7 @@ if str(BASE_DIR) not in sys.path:
 import io
 import json
 import pytest
+from types import SimpleNamespace
 
 try:
     from app import app
@@ -93,6 +94,28 @@ def test_donor_rules_character_limits():
     assert len(issues) == 1
     assert issues[0]["rule"] == "character_limit"
     assert issues[0]["current_length"] == 4500
+
+
+def test_context_fallback_uses_donor_manifest_without_inventing_evidence():
+    from blueprints.proposal_api import _deterministic_context_draft
+
+    manifest = SimpleNamespace(
+        display_name="UNFPA Türkiye CEFM Grant Call",
+        mandatory_keywords=["psea", "cefm", "rights-based", "capacity-building"],
+        mandatory_sections=["programme_summary", "expected_results"],
+        meta={"country": "Türkiye", "requirements": ["Applications must be submitted in English"]},
+    )
+    draft = _deterministic_context_draft(
+        {"donor": "unfpa_cefm", "country": "", "theme": "Protection"},
+        {"country": "", "theme": "Protection", "beneficiaries": {"total": 0, "idp_refugee": 0}},
+        manifest,
+    )
+
+    assert draft["country"] == "Türkiye"
+    assert "CEFM" in draft["title"].upper()
+    assert "verified local evidence" in draft["humanitarian_situation"]
+    assert draft["beneficiaries_total"] == 0
+    assert draft["donor_requirements_used"] == ["Applications must be submitted in English"]
 
 
 def test_blind_verifier(monkeypatch):

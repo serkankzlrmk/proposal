@@ -99,6 +99,40 @@ def test_regex_extract_requirements(monkeypatch):
     assert extracted.get("budget_cap_percent") == pytest.approx(7.0)
 
 
+def test_regex_extracts_real_call_constraints_without_llm(monkeypatch):
+    import engine.call_ingest as ci
+
+    monkeypatch.setattr(ci, "_call_llm", lambda *a, **k: "")
+    text = """
+Grant Call for the Prevention of Child, Early, and Forced Marriages (CEFM)
+UNFPA Türkiye invites civil society organizations to submit proposals.
+Applications must be submitted in English by 2 May 2025.
+Copy of provisions of legal status is required for review.
+Attachment II - Proposed Budget (maximum TRY 1,000,000)
+C.3 Proposed programme duration (for maximum 12 months)
+D.1 Programme Summary
+D.2 Organizational background and capacity to implement
+E.1 Risks
+E.2 Monitoring
+Section F. References
+Please provide 3 references to support your proposal.
+SUPPORT COST (MAX 5%)
+"""
+
+    extracted = ci.extract_requirements(text)
+
+    assert extracted["deadline"] == "2025-05-02"
+    assert extracted["currency"] == "TRY"
+    assert extracted["budget_max"] == pytest.approx(1_000_000)
+    assert extracted["max_duration_months"] == 12
+    assert extracted["budget_cap_percent"] == pytest.approx(5.0)
+    assert extracted["country"] == "Türkiye"
+    assert "Applications must be submitted in English" in extracted["requirements"]
+    assert "programme_summary" in extracted["sections"]["mandatory"]
+    assert "references" in extracted["sections"]["mandatory"]
+    assert extracted["extraction_mode"] == "deterministic"
+
+
 # ── Manifest draft (None-safe coercion) ───────────────────────────────────
 def test_build_manifest_draft_none_safe():
     draft = build_manifest_draft("call_x", "Call X", {
@@ -276,7 +310,15 @@ def test_advisor_status_summary():
 
 # ── API contract (ingest -> review -> publish) ───────────────────────────
 @pytest.fixture
-def client():
+def client(tmp_path, monkeypatch):
+    """Keep API fixtures out of the user's local proposal database."""
+    import db
+    import blueprints.call_ingest_api as call_api
+
+    test_db = tmp_path / "proposal-test.db"
+    monkeypatch.setattr(db, "DB_PATH", test_db)
+    monkeypatch.setattr(call_api, "DB_PATH", test_db)
+    db.init_db()
     app.config["TESTING"] = True
     with app.test_client() as client:
         yield client
@@ -376,3 +418,74 @@ def test_api_reject_draft(client):
     r2 = client.post(f"/api/calls/drafts/{draft_id}/reject")
     assert r2.status_code == 200
     assert r2.json["status"] == "rejected"
+
+
+def test_api_agent_names_call_when_identity_is_empty(client, monkeypatch):
+    import blueprints.call_ingest_api as call_api
+
+    monkeypatch.setattr(call_api, "_generate_call_identity", lambda corpus, extracted: {
+        "display_name": "ECHO Emergency Response 2026",
+        "call_id": "echo_emergency_response_2026",
+    })
+    pdf = make_pdf_bytes(CALL_TEXT)
+    response = client.post("/api/calls/ingest", data={
+        "file": (io.BytesIO(pdf), "call.pdf"),
+        "call_id": "",
+        "display_name": "",
+    }, content_type="multipart/form-data")
+
+    assert response.status_code == 201
+    assert response.json["call_id"] == "echo_emergency_response_2026"
+    assert response.json["manifest_draft"]["display_name"] == "ECHO Emergency Response 2026"
+
+
+def test_fallback_extraction_does_not_retry_llm_for_identity_or_brief(monkeypatch):
+    import blueprints.call_ingest_api as call_api
+    import engine.generator as generator
+
+    calls = []
+    monkeypatch.setattr(generator, "_call_llm", lambda *args, **kwargs: calls.append(kwargs.get("action")) or "")
+    extracted = {
+        "summary": "Donor call extracted deterministically (no LLM): 2 priority keywords, 1 hard gates detected.",
+        "requirements": ["PSEA is mandatory"],
+        "extraction_mode": "deterministic",
+    }
+    draft = build_manifest_draft("fallback_call", "Fallback Call", extracted)
+
+    identity = call_api._generate_call_identity("# Fallback Call\nPSEA is mandatory", extracted)
+    brief = call_api._generate_brief("# Fallback Call", extracted, draft)
+
+    assert identity["display_name"] == "# Fallback Call"
+    assert "What this call is about" in brief
+    assert calls == []
+
+
+def test_api_delete_unused_call(client):
+    pdf = make_pdf_bytes(CALL_TEXT)
+    created = client.post("/api/calls/ingest", data={
+        "file": (io.BytesIO(pdf), "delete.pdf"),
+        "call_id": "delete_unused_call",
+        "display_name": "Delete Unused Call",
+    }, content_type="multipart/form-data")
+    draft_id = created.json["draft_id"]
+
+    deleted = client.delete(f"/api/calls/drafts/{draft_id}")
+    assert deleted.status_code == 200
+    assert deleted.json["status"] == "deleted"
+    assert client.get(f"/api/calls/drafts/{draft_id}").status_code == 404
+
+
+def test_api_delete_protects_call_used_by_proposal(client):
+    from db import create_proposal
+
+    pdf = make_pdf_bytes(CALL_TEXT)
+    created = client.post("/api/calls/ingest", data={
+        "file": (io.BytesIO(pdf), "protected.pdf"),
+        "call_id": "protected_call",
+        "display_name": "Protected Call",
+    }, content_type="multipart/form-data")
+    create_proposal(donor="protected_call", title="Uses protected call")
+
+    blocked = client.delete(f"/api/calls/drafts/{created.json['draft_id']}")
+    assert blocked.status_code == 409
+    assert blocked.json["code"] == "CALL_IN_USE"

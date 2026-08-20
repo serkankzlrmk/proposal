@@ -1,3 +1,7 @@
+import { api, esc, notify, confirmAction, beginActivity, setButtonBusy } from './modules/core.js';
+import { applyStepLockState } from './modules/workspace-state.js';
+import { renderCallList, renderCallDetail } from './modules/donor-intelligence.js';
+
 // ═══════════════════════════════════════════════════════════════════════════
 // proposal/static/js/app.js — Vanilla JS (ES6) Proposal Pipeline Coordinator
 // ═══════════════════════════════════════════════════════════════════════════
@@ -15,14 +19,15 @@
     step4Subtab: 'narrative',
     autosaveTimer: null,
     advisorHistory: [],
+    callDrafts: [],
+    activeCallDraftId: null,
   };
 
   // ── DOM Element References ────────────────────────────────────────────────
   const el = {
-    proposalSelect: document.getElementById('proposalSelect'),
-    btnNewProposal: document.getElementById('btnNewProposal'),
     autosaveIndicator: document.getElementById('autosaveIndicator'),
     activeDonorBadge: document.getElementById('activeDonorBadge'),
+    workspaceProposalTitle: document.getElementById('workspaceProposalTitle'),
     stepBtns: document.querySelectorAll('.step-nav .step-btn'),
     stepViews: {
       1: document.getElementById('stepContainer1'),
@@ -85,24 +90,6 @@
     callDraftsList: document.getElementById('callDraftsList'),
   };
 
-  // ── Helper: Fetch API wrapper ─────────────────────────────────────────────
-  async function api(url, options = {}) {
-    try {
-      const res = await fetch(url, {
-        headers: { 'Content-Type': 'application/json', ...options.headers },
-        ...options,
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: res.statusText }));
-        throw new Error(err.error || `HTTP ${res.status}`);
-      }
-      return await res.json();
-    } catch (e) {
-      console.error(`API Error on ${url}:`, e);
-      throw e;
-    }
-  }
-
   // ── Autosave Manager ──────────────────────────────────────────────────────
   function triggerAutosave() {
     if (!state.activeProposalId) return;
@@ -140,6 +127,10 @@
     } catch (e) {
       el.autosaveIndicator.className = 'autosave-status';
       el.autosaveIndicator.innerHTML = `<span style="color:var(--red)">Save failed: ${e.message}</span>`;
+      if (e.code === 'STEP_LOCKED') {
+        applyStepLockState(state.proposal, state.currentStep);
+        notify('This approved step is locked. Its saved snapshot was preserved.', 'info');
+      }
     }
   }
 
@@ -149,6 +140,9 @@
     el.stepBtns.forEach(btn => {
       const s = parseInt(btn.dataset.step, 10);
       btn.classList.toggle('active', s === state.currentStep);
+      btn.classList.toggle('is-complete', s < state.currentStep);
+      if (s === state.currentStep) btn.setAttribute('aria-current', 'step');
+      else btn.removeAttribute('aria-current');
     });
     // Sub-tab buttons (Narrative|Risk|Budget) must not lose their active state
     const subTabs = document.querySelectorAll('#step4SubTabs .step-btn');
@@ -168,6 +162,8 @@
       switchStep4Subtab(state.step4Subtab || 'narrative');
     }
     if (state.currentStep === 5) renderVerifier();
+
+    applyStepLockState(state.proposal, state.currentStep);
 
     triggerAutosave();
   }
@@ -190,14 +186,22 @@
       idp_refugee: parseInt(el.inputBeneficiariesDisplaced.value, 10) || 11000,
     };
 
-    el.activeDonorBadge.textContent = state.proposal.donor;
+    updateDonorBadge(state.proposal.donor);
+    updateWorkspaceTitle(state.proposal.title);
   }
 
   function populateStep1() {
     if (!state.proposal) return;
     el.inputTitle.value = state.proposal.title || '';
     el.inputCountry.value = state.proposal.country || '';
-    el.selectDonor.value = state.proposal.donor || 'OCHA_CBPF';
+    const donorId = state.proposal.donor || '';
+    if (donorId && ![...el.selectDonor.options].some(option => option.value === donorId)) {
+      const option = document.createElement('option');
+      option.value = donorId;
+      option.textContent = state.donors[donorId]?.display_name || donorId;
+      el.selectDonor.appendChild(option);
+    }
+    el.selectDonor.value = donorId;
     el.inputTheme.value = state.proposal.theme || '';
 
     const ctx = state.proposal.context_data || {};
@@ -208,7 +212,18 @@
     el.inputBeneficiariesTotal.value = ben.total || 20000;
     el.inputBeneficiariesDisplaced.value = ben.idp_refugee || 11000;
 
-    el.activeDonorBadge.textContent = state.proposal.donor || 'OCHA_CBPF';
+    updateDonorBadge(state.proposal.donor || 'OCHA_CBPF');
+    updateWorkspaceTitle(state.proposal.title);
+  }
+
+  function updateDonorBadge(donor) {
+    el.activeDonorBadge.innerHTML = `<span class="status-dot"></span>${esc(donor || 'OCHA_CBPF')}`;
+  }
+
+  function updateWorkspaceTitle(title) {
+    if (el.workspaceProposalTitle) {
+      el.workspaceProposalTitle.textContent = title || 'Untitled proposal';
+    }
   }
 
   // ── Step 2: Theory of Change (ToC) ────────────────────────────────────────
@@ -674,6 +689,7 @@
   async function renderLanding() {
     document.getElementById('landingView').style.display = 'block';
     document.getElementById('workspace').style.display = 'none';
+    document.getElementById('donorCallSection').style.display = 'none';
     const listEl = document.getElementById('landingProposalsList');
     try {
       const res = await api('/api/proposals');
@@ -682,7 +698,7 @@
         listEl.innerHTML = `
           <div class="glass-card" style="text-align:center; padding:40px 20px;">
             <div style="font-size:15px; font-weight:600; color:var(--text); margin-bottom:6px;">No proposals yet</div>
-            <div style="font-size:12.5px; color:var(--text-secondary); margin-bottom:16px;">Start by ingesting a donor call or using a ready donor framework.</div>
+            <div style="font-size:12.5px; color:var(--text-secondary); margin-bottom:16px;">Upload the donor call documents to extract the rules and start writing.</div>
             <button class="btn btn-primary" id="btnEmptyNew">+ New Proposal</button>
           </div>`;
         document.getElementById('btnEmptyNew').addEventListener('click', createNewProposal);
@@ -690,29 +706,55 @@
       }
       listEl.innerHTML = props.map(p => {
         const donor = esc(p.donor || '—');
-        const step = p.step || 1;
+        const step = Math.min(parseInt(p.step, 10) || 1, 5);
+        const progress = Math.max(12, Math.round((step / 5) * 100));
         const updated = p.updated_at ? new Date(p.updated_at * 1000).toLocaleDateString() : '—';
         return `
-          <div class="glass-card" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding:14px 16px;">
-            <div style="flex:1; cursor:pointer;" data-open="${esc(p.id)}">
-              <div style="font-size:13.5px; font-weight:600; color:var(--text);">${esc(p.title || 'Untitled')}</div>
-              <div style="font-size:11.5px; color:var(--text-secondary); margin-top:3px;">
-                ${donor} • Step ${step}/6 • ${esc(p.country || '—')} • updated ${updated}
-              </div>
+          <article class="proposal-card glass-card" data-open="${esc(p.id)}" tabindex="0" aria-label="Open ${esc(p.title || 'Untitled proposal')}">
+            <div class="proposal-card-top">
+              <span class="proposal-donor"><span class="status-dot"></span>${donor}</span>
+              <button class="icon-button proposal-menu" type="button" data-del="${esc(p.id)}" aria-label="Delete ${esc(p.title || 'proposal')}" title="Delete proposal">×</button>
             </div>
-            <div style="display:flex; gap:8px; align-items:center;">
-              <button class="btn btn-sm btn-primary" data-open="${esc(p.id)}">Open</button>
-              <button class="btn btn-sm" data-del="${esc(p.id)}" style="color:var(--red);">Delete</button>
+            <div class="proposal-card-body">
+              <h3>${esc(p.title || 'Untitled proposal')}</h3>
+              <p>${esc(p.country || 'Global')} · ${esc(p.theme || 'Multi-sector')}</p>
             </div>
-          </div>`;
+            <div class="proposal-progress" aria-label="Step ${step} of 5">
+              <div><span>Stage ${String(step).padStart(2, '0')} of 05</span><strong>${progress}%</strong></div>
+              <span class="progress-track"><i style="width:${progress}%"></i></span>
+            </div>
+            <footer><span>Updated ${updated}</span><span class="open-arrow">Open <b>→</b></span></footer>
+          </article>`;
       }).join('');
-      listEl.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => openProposalFromLanding(b.dataset.open)));
+      listEl.querySelectorAll('[data-open]').forEach(card => {
+        card.addEventListener('click', event => {
+          if (!event.target.closest('[data-del]')) openProposalFromLanding(card.dataset.open);
+        });
+        card.addEventListener('keydown', event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openProposalFromLanding(card.dataset.open);
+          }
+        });
+      });
       listEl.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
-        if (!confirm('Delete this proposal permanently?')) return;
+        const confirmed = await confirmAction({
+          title: 'Delete proposal?',
+          message: 'This permanently removes the proposal and its review history.',
+          confirmLabel: 'Delete proposal',
+          danger: true,
+        });
+        if (!confirmed) return;
+        const activity = beginActivity({ title: 'Deleting proposal', detail: 'Removing the proposal and its review history…' });
         try {
           await api(`/api/proposals/${b.dataset.del}`, { method: 'DELETE' });
+          activity.success('Proposal deleted.');
+          notify('Proposal deleted.', 'success');
           renderLanding();
-        } catch (e) { alert(`Delete failed: ${e.message}`); }
+        } catch (e) {
+          activity.fail(`Proposal deletion failed: ${e.message}`);
+          notify(`Delete failed: ${e.message}`, 'danger');
+        }
       }));
     } catch (e) {
       listEl.innerHTML = `<div style="color:var(--red); font-size:13px;">Failed to load proposals: ${esc(e.message)}</div>`;
@@ -727,7 +769,7 @@
 
   // ── Step 1: AI Context Drafting ─────────────────────────────────────────
   async function handleGenerateContext() {
-    if (!state.activeProposalId) { alert('Create/select a proposal first.'); return; }
+    if (!state.activeProposalId) { notify('Create or select a proposal first.', 'info'); return; }
     // Push current Step 1 inputs into state and persist BEFORE drafting,
     // so the backend drafts for the country/theme the user actually typed.
     collectStep1Inputs();
@@ -737,21 +779,36 @@
         body: JSON.stringify(state.proposal),
       });
     } catch (e) { /* continue anyway */ }
-    el.btnAiGenerateContext.disabled = true;
+    const activity = beginActivity({
+      title: 'Drafting proposal context',
+      detail: 'Reading the donor rules and your project inputs…',
+    });
+    setButtonBusy(el.btnAiGenerateContext, true);
     el.btnAiGenerateContext.textContent = 'Drafting context...';
     try {
       const res = await api(`/api/proposals/${state.activeProposalId}/generate-context`, { method: 'POST' });
+      activity.update('Applying the generated context to your workspace…');
       const ctx = res.context_data || {};
       if (res.title) el.inputTitle.value = res.title;
+      if (ctx.country) el.inputCountry.value = ctx.country;
+      if (ctx.theme) el.inputTheme.value = ctx.theme;
       if (ctx.humanitarian_situation) el.inputHumSit.value = ctx.humanitarian_situation;
       if (ctx.needs_assessment) el.inputNeeds.value = ctx.needs_assessment;
       if (ctx.beneficiaries_total) el.inputBeneficiariesTotal.value = ctx.beneficiaries_total;
       if (ctx.beneficiaries_displaced) el.inputBeneficiariesDisplaced.value = ctx.beneficiaries_displaced;
       triggerAutosave();
+      if (res.generation_mode === 'deterministic_fallback') {
+        activity.success('Donor-rule context draft applied.');
+        notify(res.notice || 'AI was unavailable, so a donor-rule context draft was applied for review.', 'info', 6500);
+      } else {
+        activity.success('AI context draft is ready and being autosaved.');
+        notify('AI context draft generated and saved.', 'success');
+      }
     } catch (e) {
-      alert(`Context draft failed: ${e.message}`);
+      activity.fail(`Context drafting failed: ${e.message}`);
+      notify(`Context draft failed: ${e.message}`, 'danger');
     } finally {
-      el.btnAiGenerateContext.disabled = false;
+      setButtonBusy(el.btnAiGenerateContext, false);
       el.btnAiGenerateContext.textContent = 'Generate Context with AI';
     }
   }
@@ -760,7 +817,8 @@
   async function handleAgentRisk() {
     if (!state.activeProposalId) return;
     const btn = document.getElementById('btnAgentRisk');
-    btn.disabled = true; btn.textContent = '🤖 Drafting risks...';
+    const activity = beginActivity({ title: 'Drafting risk register', detail: 'Identifying risks, assumptions and mitigations…' });
+    setButtonBusy(btn, true); btn.textContent = 'Drafting risks...';
     try {
       const res = await api(`/api/proposal-v2/steps/4/generate-risk`, {
         method: 'POST',
@@ -770,17 +828,20 @@
       state.proposal.budget_data.risks = res.risks || [];
       renderStep4Risk();
       triggerAutosave();
+      activity.success('Risk register generated and saved.');
     } catch (e) {
-      alert(`Risk agent failed: ${e.message}`);
+      activity.fail(`Risk drafting failed: ${e.message}`);
+      notify(`Risk agent failed: ${e.message}`, 'danger');
     } finally {
-      btn.disabled = false; btn.textContent = '🤖 Agent: Draft Risks';
+      setButtonBusy(btn, false); btn.textContent = '🤖 Agent: Draft Risks';
     }
   }
 
   async function handleAgentBudget() {
     if (!state.activeProposalId) return;
     const btn = document.getElementById('btnAgentBudget');
-    btn.disabled = true; btn.textContent = '🤖 Drafting budget...';
+    const activity = beginActivity({ title: 'Building proposal budget', detail: 'Aligning cost lines with the donor ceiling and rules…' });
+    setButtonBusy(btn, true); btn.textContent = 'Drafting budget...';
     try {
       const res = await api(`/api/proposal-v2/steps/4/generate-budget`, {
         method: 'POST',
@@ -791,22 +852,28 @@
       state.proposal.budget_data.currency = res.currency || 'USD';
       renderStep4Budget();
       triggerAutosave();
+      activity.success('Budget draft generated and saved.');
     } catch (e) {
-      alert(`Budget agent failed: ${e.message}`);
+      activity.fail(`Budget drafting failed: ${e.message}`);
+      notify(`Budget agent failed: ${e.message}`, 'danger');
     } finally {
-      btn.disabled = false; btn.textContent = '🤖 Agent: Draft Budget';
+      setButtonBusy(btn, false); btn.textContent = '🤖 Agent: Draft Budget';
     }
   }
 
   // ── Step 6: Donor Call Ingestion ────────────────────────────────────────
   async function handleIngestCall() {
     const files = el.callFileInput.files;
-    if (!files || !files.length) { alert('Select at least one donor call document (PDF/DOCX/MD).'); return; }
-    const callId = el.callIdInput.value.trim() || `call_${Date.now().toString(36)}`;
-    const displayName = el.callNameInput.value.trim() || callId;
+    if (!files || !files.length) { notify('Select at least one donor call document (PDF, DOCX or Markdown).', 'info'); return; }
+    const callId = el.callIdInput.value.trim();
+    const displayName = el.callNameInput.value.trim();
 
-    el.btnIngestCall.disabled = true;
-    el.btnIngestCall.textContent = 'Extracting requirements...';
+    const stopProgress = startUploadProgress(el.btnIngestCall);
+    const activity = beginActivity({
+      title: 'Processing donor call',
+      detail: `Uploading and reading ${files.length} source document${files.length === 1 ? '' : 's'}…`,
+    });
+    notify('Upload started. Donor documents are being analysed.', 'info');
     try {
       const fd = new FormData();
       for (const f of files) fd.append('files', f);
@@ -815,167 +882,175 @@
       const res = await fetch('/api/calls/ingest', { method: 'POST', body: fd });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+      activity.update('Building the summary, requirements and donor rule preview…');
       renderCallIngestResult(body);
-      loadCallDrafts();
+      await loadCallDrafts(body.draft_id);
+      document.getElementById('callUploadPanel').hidden = true;
+      activity.success(`${body.manifest_draft?.display_name || body.call_id} is ready for review.`);
+      notify(`${body.manifest_draft?.display_name || body.call_id} uploaded successfully.`, 'success');
     } catch (e) {
-      alert(`Ingest failed: ${e.message}`);
+      activity.fail(`Call processing failed: ${e.message}`);
+      notify(`Ingest failed: ${e.message}`, 'danger');
     } finally {
-      el.btnIngestCall.disabled = false;
-      el.btnIngestCall.textContent = 'Ingest Call & Extract Requirements';
+      stopProgress();
     }
   }
 
-  // ── Donor Call section (separate, after the wizard) ─────────────────────
-  function showDonorCallSection() {
+  function startUploadProgress(button) {
+    const startedAt = Date.now();
+    setButtonBusy(button, true);
+    const update = () => {
+      const seconds = Math.floor((Date.now() - startedAt) / 1000);
+      button.textContent = seconds < 4
+        ? 'Uploading documents...'
+        : `Analysing donor call · ${seconds}s`;
+    };
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => {
+      window.clearInterval(timer);
+      setButtonBusy(button, false);
+      button.textContent = 'Extract donor intelligence';
+    };
+  }
+
+  // ── Donor Intelligence (separate from the proposal wizard) ──────────────
+  async function showDonorCallSection(focusCallId = '') {
     document.getElementById('landingView').style.display = 'none';
     document.getElementById('workspace').style.display = 'none';
     document.getElementById('donorCallSection').style.display = 'block';
-    loadCallDrafts();
+    await loadCallDrafts('', focusCallId);
   }
 
   function renderCallIngestResult(body) {
-    const m = body.manifest_draft || {};
-    const gates = Object.entries(m.hard_eligibility_gates || {})
-      .map(([k, v]) => `<span class="gate-badge pass">${esc(k)}</span>`).join(' ') || '<span class="gate-badge unverified">none</span>';
-    const docs = (body.documents || []).map(d =>
-      `<span class="gate-badge unverified">📄 ${esc(d.filename)} (${d.chars.toLocaleString()} chars)</span>`
-    ).join(' ') || '';
-    const brief = body.brief || '';
-    el.callIngestResult.style.display = 'block';
-    el.callIngestResult.innerHTML = `
-      <div class="glass-card">
-        <div class="step-header-area" style="margin-bottom: 8px;">
-          <div>
-            <h3 style="font-size: 13px; font-weight: 600; color: var(--text);">Extraction Result — <span class="gate-badge pass">REVIEW</span></h3>
-            <p style="font-size: 12px; color: var(--text-secondary);">${esc(body.summary || '')}</p>
-          </div>
-          <div style="display:flex; gap:8px;">
-            <button class="btn btn-sm btn-primary" id="btnPublishDraft">Publish Manifest</button>
-            <button class="btn btn-sm" id="btnRejectDraft">Reject</button>
-          </div>
-        </div>
-        ${docs ? `<div style="font-size: 12px; margin-bottom: 8px;"><strong>Uploaded documents:</strong> ${docs}</div>` : ''}
-        ${brief ? `<div style="font-size: 12.5px; line-height: 1.7; background: rgba(2,132,199,0.06); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; white-space: pre-wrap;">${esc(brief)}</div>` : ''}
-        <div style="font-size: 12px; line-height: 1.9;">
-          <div><strong>Deadline:</strong> ${esc(body.deadline || 'unknown')} &nbsp;|&nbsp; <strong>Currency:</strong> ${esc(m.currency || 'USD')} &nbsp;|&nbsp; <strong>Budget max:</strong> ${m.budget_max ? m.budget_max.toLocaleString() : '—'} &nbsp;|&nbsp; <strong>Duration:</strong> ${m.max_duration_months || '—'} mo</div>
-          <div><strong>Hard gates:</strong> ${gates}</div>
-          <div><strong>Keywords:</strong> ${(m.mandatory_keywords || []).map(k => esc(k)).join(', ') || '—'}</div>
-          <div><strong>Sections (${(m.sections?.mandatory || []).length}):</strong> ${(m.sections?.mandatory || []).slice(0, 8).map(s => esc(s)).join(', ')}${(m.sections?.mandatory || []).length > 8 ? '…' : ''}</div>
-        </div>
-      </div>
-    `;
-    document.getElementById('btnPublishDraft').addEventListener('click', () => publishDraft(body.draft_id));
-    document.getElementById('btnRejectDraft').addEventListener('click', () => rejectDraft(body.draft_id));
+    const draft = {
+      id: body.draft_id,
+      call_id: body.call_id,
+      display_name: body.manifest_draft?.display_name || body.call_id,
+      status: body.status || 'review',
+      summary: body.summary,
+      brief: body.brief,
+      deadline: body.deadline,
+      documents: body.documents || [],
+      requirements: body.requirements || [],
+      manifest: body.manifest_draft || {},
+    };
+    state.activeCallDraftId = draft.id;
+    renderCallDetail(el.callIngestResult, draft, callIntelligenceHandlers());
   }
 
   async function publishDraft(draftId) {
+    const activity = beginActivity({ title: 'Approving donor rules', detail: 'Validating the manifest before publication…' });
     try {
       const res = await api(`/api/calls/drafts/${draftId}/publish`, { method: 'POST' });
-      alert(`Manifest published: ${res.donor_id}\nEngine now scores against it.`);
-      loadCallDrafts();
-    } catch (e) { alert(`Publish failed: ${e.message}`); }
-  }
-
-  async function rejectDraft(draftId) {
-    try {
-      await api(`/api/calls/drafts/${draftId}/reject`, { method: 'POST' });
-      loadCallDrafts();
-    } catch (e) { alert(`Reject failed: ${e.message}`); }
-  }
-
-  // ── View full call brief (modal) ────────────────────────────────────────
-  async function viewCallBrief(draftId) {
-    try {
-      const res = await api(`/api/calls/drafts/${draftId}`);
-      const d = res.draft || {};
-      const manifest = d.manifest || {};
-      const docs = (d.documents || []).map(x => `📄 ${esc(x.filename)} (${x.chars?.toLocaleString() || '?'} chars)`).join('\n') || '—';
-      const gates = Object.entries(manifest.hard_eligibility_gates || {})
-        .map(([k, v]) => `• ${k}`).join('\n') || '• none';
-      const briefHtml = (d.brief || 'No brief available.').split('\n').map(l =>
-        l.startsWith('## ') ? `<h4 style="margin:12px 0 6px; font-size:13px; color:var(--text);">${esc(l.slice(3))}</h4>`
-        : l.startsWith('- ') ? `<div style="font-size:12.5px; color:var(--text-secondary); padding-left:12px;">• ${esc(l.slice(2))}</div>`
-        : (l.trim() ? `<div style="font-size:12.5px; color:var(--text-secondary); margin:3px 0;">${esc(l)}</div>` : '')
-      ).join('');
-
-      // Reuse the modal pattern: build a lightweight overlay in-place
-      const overlay = document.createElement('div');
-      overlay.className = 'modal-overlay';
-      overlay.id = 'briefModal';
-      overlay.innerHTML = `
-        <div class="modal-card" style="width:640px; max-width:94vw;">
-          <div class="step-header-area" style="margin-bottom:12px;">
-            <div>
-              <h2 class="step-title" style="font-size:15px;">Call Brief — ${esc(d.display_name || d.call_id || '')}</h2>
-              <p class="step-subtitle" style="font-size:11.5px;">${esc(d.call_id || '')} • deadline ${esc(d.deadline || '—')} • status ${esc((d.status || '').toUpperCase())}</p>
-            </div>
-            <button class="btn btn-sm" id="btnCloseBrief">✕</button>
-          </div>
-          <div style="font-size:11.5px; color:var(--text-secondary); margin-bottom:10px; white-space:pre-line;"><strong>Documents:</strong>\n${docs}</div>
-          <div style="font-size:11.5px; color:var(--text-secondary); margin-bottom:10px; white-space:pre-line;"><strong>Hard gates:</strong>\n${gates}</div>
-          <div style="border-top:1px solid var(--border); padding-top:10px; max-height:46vh; overflow-y:auto;">
-            ${briefHtml}
-          </div>
-        </div>`;
-      document.body.appendChild(overlay);
-      overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-      document.getElementById('btnCloseBrief').addEventListener('click', () => overlay.remove());
+      activity.update('Refreshing the approved source of truth…');
+      notify(`Manifest published. The engine now scores against ${res.donor_id}.`, 'success');
+      await loadCallDrafts(draftId);
+      await viewCallIntelligence(draftId);
+      activity.success('Donor rules approved and active.');
     } catch (e) {
-      alert(`Failed to load brief: ${e.message}`);
+      activity.fail(`Approval failed: ${e.message}`);
+      notify(`Publish failed: ${e.message}`, 'danger');
     }
   }
 
-  async function loadCallDrafts() {
+  async function rejectDraft(draftId) {
+    const activity = beginActivity({ title: 'Rejecting extracted rules', detail: 'Updating the call review status…' });
+    try {
+      await api(`/api/calls/drafts/${draftId}/reject`, { method: 'POST' });
+      notify('Call rules rejected. No proposal was created.', 'info');
+      await loadCallDrafts(draftId);
+      await viewCallIntelligence(draftId);
+      activity.success('Call review marked as rejected.');
+    } catch (e) {
+      activity.fail(`Rejection failed: ${e.message}`);
+      notify(`Reject failed: ${e.message}`, 'danger');
+    }
+  }
+
+  async function deleteCall(draftId) {
+    const draft = state.callDrafts.find(item => item.id === draftId);
+    const confirmed = await confirmAction({
+      title: 'Delete donor call?',
+      message: `This removes “${draft?.display_name || 'this call'}” and its extracted rules. Calls already used by a proposal are protected.`,
+      confirmLabel: 'Delete call',
+      danger: true,
+    });
+    if (!confirmed) return;
+
+    const activity = beginActivity({ title: 'Deleting donor call', detail: 'Checking proposal dependencies before removal…' });
+    try {
+      await api(`/api/calls/drafts/${draftId}`, { method: 'DELETE' });
+      state.activeCallDraftId = null;
+      notify('Donor call deleted.', 'success');
+      await loadCallDrafts();
+      activity.success('Donor call removed.');
+    } catch (e) {
+      activity.fail(e.code === 'CALL_IN_USE' ? e.message : `Delete failed: ${e.message}`);
+      notify(e.code === 'CALL_IN_USE' ? e.message : `Delete failed: ${e.message}`, 'danger');
+    }
+  }
+
+  async function viewCallIntelligence(draftId) {
+    el.callIngestResult.classList.add('is-refreshing');
+    el.callIngestResult.setAttribute('aria-busy', 'true');
+    try {
+      const res = await api(`/api/calls/drafts/${draftId}`);
+      const draft = res.draft || {};
+      state.activeCallDraftId = draftId;
+      renderCallDetail(el.callIngestResult, draft, callIntelligenceHandlers());
+      renderCallList(el.callDraftsList, state.callDrafts, draftId, callIntelligenceHandlers());
+    } catch (e) {
+      notify(`Failed to load donor intelligence: ${e.message}`, 'danger');
+    } finally {
+      el.callIngestResult.classList.remove('is-refreshing');
+      el.callIngestResult.removeAttribute('aria-busy');
+    }
+  }
+
+  function callIntelligenceHandlers() {
+    return {
+      onSelect: viewCallIntelligence,
+      onPublish: publishDraft,
+      onReject: rejectDraft,
+      onStart: createProposalWithDonor,
+      onDelete: deleteCall,
+    };
+  }
+
+  async function loadCallDrafts(preferredDraftId = '', preferredCallId = '') {
     try {
       const res = await api('/api/calls/drafts');
       const drafts = res.drafts || [];
-      if (!drafts.length) {
-        el.callDraftsList.innerHTML = '<div style="color:var(--text-secondary); font-size:12.5px;">No calls ingested yet.</div>';
-        return;
-      }
-      el.callDraftsList.innerHTML = drafts.map(d => {
-        const docs = (d.documents || []).map(x => esc(x.filename)).join(', ');
-        return `
-        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); font-size:12.5px;">
-          <div>
-            <strong>${esc(d.display_name)}</strong>
-            <span class="gate-badge ${d.status === 'published' ? 'pass' : (d.status === 'rejected' ? 'hard-fail' : 'unverified')}">${esc(d.status.toUpperCase())}</span>
-            <div style="color:var(--text-secondary); font-size:11px;">${esc(d.call_id)} • deadline ${esc(d.deadline || '—')}${docs ? ` • 📄 ${docs}` : ''}</div>
-            ${d.brief ? `<div style="color:var(--text-secondary); font-size:11px; margin-top:2px; max-width:560px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(d.brief.split('\n')[0])}</div>` : ''}
-          </div>
-          ${d.status === 'review' ? `
-            <div style="display:flex; gap:6px;">
-              <button class="btn btn-sm btn-primary" data-pub="${d.id}">Publish</button>
-              <button class="btn btn-sm" data-rej="${d.id}">Reject</button>
-            </div>` : ''}
-          <div style="display:flex; gap:6px;">
-            <button class="btn btn-sm" data-brief="${d.id}" title="View the full call brief">📋 Brief</button>
-          </div>
-        </div>`;
-      }).join('');
-      el.callDraftsList.querySelectorAll('[data-pub]').forEach(b => b.addEventListener('click', () => publishDraft(b.dataset.pub)));
-      el.callDraftsList.querySelectorAll('[data-rej]').forEach(b => b.addEventListener('click', () => rejectDraft(b.dataset.rej)));
-      el.callDraftsList.querySelectorAll('[data-brief]').forEach(b => b.addEventListener('click', () => viewCallBrief(b.dataset.brief)));
+      state.callDrafts = drafts;
+      const preferred = drafts.find(draft => draft.id === preferredDraftId)
+        || drafts.find(draft => draft.call_id === preferredCallId)
+        || drafts.find(draft => draft.id === state.activeCallDraftId)
+        || drafts[0];
+      state.activeCallDraftId = preferred?.id || null;
+      renderCallList(el.callDraftsList, drafts, state.activeCallDraftId, callIntelligenceHandlers());
+      if (preferred) await viewCallIntelligence(preferred.id);
     } catch (e) {
-      el.callDraftsList.innerHTML = `<div style="color:var(--red); font-size:12.5px;">Failed to load drafts: ${esc(e.message)}</div>`;
+      el.callDraftsList.innerHTML = `<div class="intelligence-empty" style="min-height:220px;"><h3>Calls unavailable</h3><p>${esc(e.message)}</p></div>`;
     }
   }
 
   // ── Step 5: Verifier Audit & PDF ──────────────────────────────────────────
   function renderVerifier() {
     const rev = state.proposal?.review_data || {};
-    const score = rev.score || 94;
-    const verdict = rev.verdict || 'pass';
+    const hasReview = typeof rev.score === 'number';
+    const score = hasReview ? rev.score : null;
+    const verdict = hasReview ? (rev.verdict || 'pending') : 'pending';
     const issues = rev.issues || [];
 
-    el.verifierScoreVal.textContent = `${score.toFixed(0)}/100`;
-    el.scoreBanner.className = `score-banner ${verdict === 'fail' ? 'fail' : 'pass'}`;
-    el.verifierSummaryText.textContent = rev.summary || 'Automated compliance checks completed against donor benchmarks.';
+    el.verifierScoreVal.textContent = hasReview ? `${score.toFixed(0)}/100` : '—/100';
+    el.scoreBanner.className = `score-banner ${verdict === 'fail' ? 'fail' : (verdict === 'pass' ? 'pass' : 'pending')}`;
+    el.verifierSummaryText.textContent = rev.summary || 'Run the verifier to calculate a donor compliance score.';
 
     if (issues.length === 0) {
       el.verifierIssuesList.innerHTML = `
         <div style="color:#1e9e4f; font-size:12.5px; padding:12px; background:var(--green-light); border-radius:4px;">
-          ✓ All donor constraints, character limits, and vulnerable population quotas satisfied.
+          ${hasReview ? '✓ All donor constraints, character limits, and vulnerable population quotas satisfied.' : 'No audit findings yet. Run the verifier when the proposal is ready.'}
         </div>
       `;
     } else {
@@ -1068,7 +1143,7 @@
               return `
                 <tr class="score-row" data-step="${esc(t.target_step || '')}" data-field="${esc(t.target_field || '')}"
                     data-criterion="${esc(t.criterion || '')}" title="${esc(t.details || '')}">
-                  <td class="score-criterion">${esc(t.criterion || '')}</td>
+                  <td class="score-criterion">${esc(formatCriterion(t.criterion || ''))}</td>
                   <td>
                     <div class="score-bar-track"><div class="score-bar-fill ${barCls}" style="width:${pct}%"></div></div>
                   </td>
@@ -1103,61 +1178,55 @@
     }
   }
 
+  function formatCriterion(value) {
+    return String(value || '')
+      .split('_')
+      .filter(Boolean)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  }
+
   // ── Jump-to-editor DOM navigation (target_step / target_field) ─────────────
   function jumpToField(step, field) {
-    if (!step || step < 1 || step > 5) step = 2;
-    setStep(step);
+    const contextMap = {
+      title: 'inputTitle', country: 'inputCountry', humanitarian_situation: 'inputHumSit',
+      needs_assessment: 'inputNeeds', beneficiaries: 'inputBeneficiariesTotal',
+    };
+    const narrativeFields = new Set([
+      'project_summary', 'executive_summary', 'beneficiary_targeting', 'justification',
+      'strategic_justification', 'context_relevance', 'program_rationale', 'risk_management',
+      'sustainability_exit', 'methodology', 'capacity', 'cost_effectiveness',
+      'sustainability_visibility',
+    ]);
+
+    let uiStep = Number(step) || 1;
+    if (contextMap[field]) uiStep = 1;
+    else if (field === 'logframe') uiStep = 3;
+    else if (field === 'budget' || narrativeFields.has(field)) uiStep = 4;
+    uiStep = Math.max(1, Math.min(5, uiStep));
+
+    if (field === 'budget') state.step4Subtab = 'budget';
+    if (narrativeFields.has(field)) {
+      state.step4Subtab = 'narrative';
+      state.activeNarrativeTab = field;
+    }
+    setStep(uiStep);
 
     setTimeout(() => {
-      let targetEl = null;
-      const map = {
-        1: {
-          title: 'inputTitle', country: 'inputCountry', humanitarian_situation: 'inputHumSit',
-          needs_assessment: 'inputNeeds', beneficiaries: 'inputBeneficiariesTotal',
-          project_summary: 'inputTitle', strategic_justification: 'inputNeeds',
-        },
-        3: { logframe: 'logframeBody' },
-        4: { budget: 'narrativeSectionInput' },
-      };
-      // Trace target_step is a pipeline stage, not a UI step. Map stage names
-      // to the correct UI step for narrative/section fields.
-      if (['humanitarian_situation', 'needs_assessment', 'project_summary',
-           'executive_summary', 'beneficiaries', 'beneficiary_targeting',
-           'justification', 'strategic_justification', 'context_relevance',
-           'program_rationale', 'risk_management', 'sustainability_exit',
-           'methodology', 'capacity', 'cost_effectiveness',
-           'sustainability_visibility', 'title', 'country'].includes(field)) {
-        step = 1;
+      let targetEl = contextMap[field] ? document.getElementById(contextMap[field]) : null;
+      if (field === 'logframe') targetEl = document.getElementById('logframeBody');
+      if (field === 'budget') targetEl = document.getElementById('step4BudgetPane');
+      if (narrativeFields.has(field)) targetEl = document.getElementById('narrativeSectionInput');
+
+      if (!targetEl) {
+        notify('The related section is not available in this donor profile.', 'info');
+        return;
       }
-      const id = (map[step] || {})[field] || (step === 2 ? 'inputTitle' : '');
-      if (id) targetEl = document.getElementById(id);
-      if (!targetEl && field && ['project_summary', 'executive_summary',
-           'humanitarian_situation', 'needs_assessment', 'beneficiaries',
-           'beneficiary_targeting', 'justification', 'strategic_justification',
-           'risk_management', 'sustainability_exit', 'methodology', 'capacity',
-           'cost_effectiveness', 'sustainability_visibility'].includes(field)) {
-        // narrative field -> Step 4 tab
-        step = 4;
-        targetEl = document.getElementById('narrativeSectionInput');
-      }
-      if (!targetEl && step === 4) {
-        // narrative: find matching section tab
-        const tabs = el.narrativeTabsHeader?.querySelectorAll('button');
-        if (tabs) {
-          for (const t of tabs) {
-            if (t.dataset.tab === field) { t.click(); break; }
-          }
-        }
-        targetEl = document.getElementById('narrativeSectionInput');
-      }
-      if (targetEl) {
-        targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        targetEl.style.outline = '2px solid var(--primary, #3b82f6)';
-        targetEl.style.outlineOffset = '2px';
-        targetEl.focus({ preventScroll: true });
-        setTimeout(() => { targetEl.style.outline = ''; }, 2500);
-      }
-    }, 100);
+      targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      targetEl.classList.add('field-highlight');
+      if (typeof targetEl.focus === 'function') targetEl.focus({ preventScroll: true });
+      setTimeout(() => targetEl.classList.remove('field-highlight'), 2200);
+    }, 120);
   }
 
   // ── Advisor Drawer & Patch Applicator ─────────────────────────────────────
@@ -1176,6 +1245,8 @@
     const loadId = 'adv_load_' + Date.now();
     el.advisorMessages.innerHTML += `<div id="${loadId}" class="msg-bubble msg-advisor" style="opacity:0.6;">Thinking & checking donor guidelines...</div>`;
     el.advisorMessages.scrollTop = el.advisorMessages.scrollHeight;
+    const activity = beginActivity({ title: 'Advisor is reviewing', detail: 'Checking your question against the active donor rules…' });
+    setButtonBusy(el.btnSendAdvisor, true);
 
     try {
       const res = await api(`/api/proposals/${state.activeProposalId}/advisor/chat`, {
@@ -1186,9 +1257,13 @@
 
       state.advisorHistory.push({ role: 'assistant', content: res.message });
       appendAdvisorBubble('advisor', res.message, res.patch);
+      activity.success('Advisor response is ready.');
     } catch (e) {
       document.getElementById(loadId)?.remove();
       appendAdvisorBubble('advisor', `Sorry, error connecting to advisor: ${e.message}`);
+      activity.fail(`Advisor failed: ${e.message}`);
+    } finally {
+      setButtonBusy(el.btnSendAdvisor, false);
     }
   }
 
@@ -1271,105 +1346,114 @@
   // ── AI Generator Action Handlers ──────────────────────────────────────────
   async function handleGenerateToc() {
     if (!state.activeProposalId) return;
-    el.btnAiGenerateToc.disabled = true;
+    const activity = beginActivity({ title: 'Generating Theory of Change', detail: 'Connecting activities, outputs, outcomes and impact…' });
+    setButtonBusy(el.btnAiGenerateToc, true);
     el.btnAiGenerateToc.textContent = 'Generating Theory of Change...';
     try {
       collectStep1Inputs();
       await saveCurrentState();
+      activity.update('Building the causal pathway from the saved context…');
       const res = await api(`/api/proposals/${state.activeProposalId}/generate-toc`, { method: 'POST' });
       state.proposal = res.proposal;
       renderToc();
+      activity.success('Theory of Change generated and saved.');
+      notify('Theory of Change generated and saved.', 'success');
     } catch (e) {
-      alert(`Error generating ToC: ${e.message}`);
+      activity.fail(`Theory of Change failed: ${e.message}`);
+      notify(`Theory of Change generation failed: ${e.message}`, 'danger');
     } finally {
-      el.btnAiGenerateToc.disabled = false;
+      setButtonBusy(el.btnAiGenerateToc, false);
       el.btnAiGenerateToc.textContent = 'Generate ToC with AI';
     }
   }
 
   async function handleGenerateLogframe() {
     if (!state.activeProposalId) return;
-    el.btnAiGenerateLogframe.disabled = true;
+    const activity = beginActivity({ title: 'Generating logical framework', detail: 'Drafting results, indicators, verification and assumptions…' });
+    setButtonBusy(el.btnAiGenerateLogframe, true);
     el.btnAiGenerateLogframe.textContent = 'Generating 4x4 Logframe...';
     try {
       const res = await api(`/api/proposals/${state.activeProposalId}/generate-logframe`, { method: 'POST' });
       state.proposal = res.proposal;
       renderLogframe();
+      activity.success('Logical framework generated and saved.');
+      notify('Logframe generated and saved.', 'success');
     } catch (e) {
-      alert(`Error generating Logframe: ${e.message}`);
+      activity.fail(`Logframe generation failed: ${e.message}`);
+      notify(`Logframe generation failed: ${e.message}`, 'danger');
     } finally {
-      el.btnAiGenerateLogframe.disabled = false;
+      setButtonBusy(el.btnAiGenerateLogframe, false);
       el.btnAiGenerateLogframe.textContent = 'Generate Logframe with AI';
     }
   }
 
   async function handleGenerateNarrative() {
     if (!state.activeProposalId) return;
-    el.btnAiGenerateNarrative.disabled = true;
-    el.btnAiGenerateNarrative.textContent = 'Drafting All Sections...';
+    const activity = beginActivity({
+      title: 'Preparing proposal narrative',
+      detail: 'This may take several minutes. You may continue working in other sections…',
+    });
+    setButtonBusy(el.btnAiGenerateNarrative, true);
+    el.btnAiGenerateNarrative.textContent = 'Preparing Narrative...';
+    notify('Narrative preparation has started. You may continue working; the completed draft will be saved automatically.', 'info', 7600);
     try {
       const res = await api(`/api/proposals/${state.activeProposalId}/generate-narrative`, { method: 'POST' });
       state.proposal = res.proposal;
       renderNarrative();
+      activity.success('Narrative preparation is complete and the draft has been saved.');
+      notify('Narrative preparation is complete. Your draft has been saved.', 'success');
     } catch (e) {
-      alert(`Error generating Narrative: ${e.message}`);
+      activity.fail(`Narrative drafting failed: ${e.message}`);
+      notify(`Narrative generation failed: ${e.message}`, 'danger');
     } finally {
-      el.btnAiGenerateNarrative.disabled = false;
+      setButtonBusy(el.btnAiGenerateNarrative, false);
       el.btnAiGenerateNarrative.textContent = 'Draft All Sections with AI';
     }
   }
 
   async function handleRunVerifier() {
     if (!state.activeProposalId) return;
-    el.btnRunVerifier.disabled = true;
+    const activity = beginActivity({ title: 'Running compliance audit', detail: 'Saving the latest changes before deterministic checks…' });
+    setButtonBusy(el.btnRunVerifier, true);
     el.btnRunVerifier.textContent = 'Auditing Compliance...';
     try {
       await saveCurrentState();
       // Deterministic donor score analysis (YAML rules engine)
+      activity.update('Checking eligibility gates, budget rules and required sections…');
       const analysis = await api(`/api/proposals/${state.activeProposalId}/analyze`, { method: 'POST' });
       renderAnalysis(analysis);
       // LLM blind verifier (semantic layer)
+      activity.update('Running the final semantic quality review…');
       const res = await api(`/api/proposals/${state.activeProposalId}/verify`, { method: 'POST' });
       state.proposal = res.proposal;
       renderVerifier();
+      activity.success('Compliance audit complete.');
+      notify('Compliance audit complete.', 'success');
     } catch (e) {
-      alert(`Error auditing: ${e.message}`);
+      activity.fail(`Compliance audit failed: ${e.message}`);
+      notify(`Compliance audit failed: ${e.message}`, 'danger');
     } finally {
-      el.btnRunVerifier.disabled = false;
+      setButtonBusy(el.btnRunVerifier, false);
       el.btnRunVerifier.textContent = 'Run Verifier Audit';
     }
   }
 
   function handleExportPdf() {
     if (!state.activeProposalId) return;
+    const activity = beginActivity({ title: 'Preparing proposal PDF', detail: 'Formatting the latest saved proposal for export…' });
+    notify('PDF preparation started. Your download will begin shortly.', 'info');
     window.location.href = `/api/proposals/${state.activeProposalId}/export/pdf`;
+    window.setTimeout(() => activity.success('PDF export was sent to your downloads.'), 1400);
   }
 
   // ── Proposal Management ───────────────────────────────────────────────────
-  async function loadProposalsList() {
-    try {
-      const res = await api('/api/proposals');
-      const list = res.proposals || [];
-
-      el.proposalSelect.innerHTML = '<option value="">-- Select Proposal --</option>';
-      list.forEach(p => {
-        const opt = document.createElement('option');
-        opt.value = p.id;
-        opt.textContent = `${p.title || 'Untitled'} (${p.donor} • ${p.country || 'Global'})`;
-        el.proposalSelect.appendChild(opt);
-      });
-      // No auto-open: the landing view drives proposal selection
-    } catch (e) {
-      console.error('Failed to load proposals list:', e);
-    }
-  }
-
   async function loadProposal(id) {
     try {
       const res = await api(`/api/proposals/${id}`);
       state.activeProposalId = id;
       state.proposal = res.proposal;
-      el.proposalSelect.value = id;
+      state.activeNarrativeTab = null;
+      state.step4Subtab = 'narrative';
 
       // Always switch to the wizard workspace when opening a proposal
       document.getElementById('landingView').style.display = 'none';
@@ -1384,61 +1468,32 @@
   }
 
   async function createNewProposal() {
-    // Open the picker modal: published calls / ready donors / upload new
-    await loadPublishedCalls();
+    // Every new proposal begins from user-uploaded donor source documents.
     document.getElementById('newProposalModal').style.display = 'flex';
   }
 
-  async function loadPublishedCalls() {
-    const listEl = document.getElementById('publishedCallsList');
-    try {
-      const res = await api('/api/calls/published');
-      const published = res.published || [];
-      if (!published.length) {
-        listEl.innerHTML = '<div style="color:var(--text-secondary); font-size:12.5px;">No published calls yet — upload one below or use a ready donor.</div>';
-        return;
-      }
-      listEl.innerHTML = published.map(c => `
-        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border); font-size:12.5px;">
-          <div>
-            <strong>${esc(c.display_name)}</strong>
-            <div style="color:var(--text-secondary); font-size:11px;">${esc(c.call_id)} • deadline ${esc(c.deadline || '—')}</div>
-          </div>
-          <button class="btn btn-sm btn-primary" data-call="${esc(c.call_id)}">Use This Call</button>
-        </div>
-      `).join('');
-      listEl.querySelectorAll('[data-call]').forEach(b => b.addEventListener('click', () => {
-        document.getElementById('newProposalModal').style.display = 'none';
-        createProposalWithDonor(b.dataset.call);
-      }));
-    } catch (e) {
-      listEl.innerHTML = `<div style="color:var(--red); font-size:12.5px;">Failed to load calls: ${esc(e.message)}</div>`;
-    }
-  }
-
-  async function createProposalWithDonor(donor) {
+  async function createProposalWithDonor(donor, displayName = '') {
+    const activity = beginActivity({ title: 'Creating proposal workspace', detail: 'Connecting the approved call rules to a new proposal…' });
     try {
       const res = await api('/api/proposals/new', {
         method: 'POST',
         body: JSON.stringify({
-          title: 'Emergency Multi-Sectoral Humanitarian Response',
-          country: 'Sudan',
+          title: displayName ? `${displayName} Proposal` : 'Untitled Proposal',
+          country: '',
           donor,
-          theme: 'WASH & Protection',
+          theme: 'Multi-sector',
         }),
       });
       const newProp = res.proposal;
-      const opt = document.createElement('option');
-      opt.value = newProp.id;
-      opt.textContent = `${newProp.title} (${newProp.donor})`;
-      el.proposalSelect.prepend(opt);
       // Switch to the wizard workspace (landing + donor section hidden)
       document.getElementById('landingView').style.display = 'none';
       document.getElementById('donorCallSection').style.display = 'none';
       document.getElementById('workspace').style.display = 'block';
       await loadProposal(newProp.id);
+      activity.success('Proposal workspace is ready.');
     } catch (e) {
-      alert(`Error creating proposal: ${e.message}`);
+      activity.fail(`Proposal creation failed: ${e.message}`);
+      notify(`Proposal creation failed: ${e.message}`, 'danger');
     }
   }
 
@@ -1446,41 +1501,39 @@
     try {
       const res = await api('/api/proposals/donors');
       state.donors = res.donors || {};
-      // Populate the donor <select>: built-in donors first, then published calls
+      // Donor profiles remain available for generation rules, but the user does
+      // not choose from a ready-made list. The uploaded call owns this field.
       const sel = el.selectDonor;
-      const current = sel.value;
-      sel.innerHTML = '';
-      for (const [id, profile] of Object.entries(state.donors)) {
-        const label = (profile && profile.display_name) ? profile.display_name : id;
-        const opt = document.createElement('option');
-        opt.value = id;
-        opt.textContent = label;
-        sel.appendChild(opt);
-      }
-      try {
-        const calls = await api('/api/calls/published');
-        for (const c of (calls.published || [])) {
-          const opt = document.createElement('option');
-          opt.value = c.call_id;
-          opt.textContent = `${c.display_name} (${c.call_id})`;
-          sel.appendChild(opt);
-        }
-      } catch (e) { /* calls list optional */ }
-      if (current && [...sel.options].some(o => o.value === current)) sel.value = current;
+      sel.innerHTML = '<option value="">Upload a donor call to begin</option>';
     } catch (e) {
       console.error('Failed to load donor profiles:', e);
     }
   }
 
-  // ── Utility: Escaping HTML ────────────────────────────────────────────────
-  function esc(str) {
-    if (!str) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
+  async function navigateToSightline() {
+    if (state.activeProposalId) await saveCurrentState();
+    const configuredHome = document.documentElement.dataset.sightlineHome || '';
+    const navigationEvent = new CustomEvent('sightline:navigate', {
+      cancelable: true,
+      detail: { target: 'home', source: 'proposal-studio' },
+    });
+    const handledByHost = !window.dispatchEvent(navigationEvent);
+    if (handledByHost) return;
+
+    if (window.parent !== window) {
+      window.parent.postMessage({ type: 'sightline:navigate', target: 'home', source: 'proposal-studio' }, '*');
+      return;
+    }
+    if (configuredHome) {
+      window.location.assign(configuredHome);
+      return;
+    }
+    notify('Sightline home navigation is ready for the host integration.', 'info');
+  }
+
+  async function goToProposalHome() {
+    if (state.activeProposalId) await saveCurrentState();
+    await renderLanding();
   }
 
   // ── Event Bindings ────────────────────────────────────────────────────────
@@ -1542,6 +1595,7 @@
     // Step 4: per-subtab agents
     document.getElementById('btnAgentRisk').addEventListener('click', handleAgentRisk);
     document.getElementById('btnAgentBudget').addEventListener('click', handleAgentBudget);
+    document.getElementById('btnAgentNarrative').addEventListener('click', handleGenerateNarrative);
 
     // Step 6: Donor Call Ingestion
     el.btnIngestCall.addEventListener('click', handleIngestCall);
@@ -1550,40 +1604,53 @@
     document.getElementById('btnCloseNewProposal').addEventListener('click', () => {
       document.getElementById('newProposalModal').style.display = 'none';
     });
-    document.querySelectorAll('.ready-donor').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.getElementById('newProposalModal').style.display = 'none';
-        createProposalWithDonor(btn.dataset.donor);
-      });
-    });
     document.getElementById('btnModalIngest').addEventListener('click', async () => {
       const files = document.getElementById('modalCallFiles').files;
-      if (!files || !files.length) { alert('Select at least one document.'); return; }
-      const callId = document.getElementById('modalCallId').value.trim() || `call_${Date.now().toString(36)}`;
-      const displayName = document.getElementById('modalCallName').value.trim() || callId;
+      if (!files || !files.length) { notify('Select at least one document.', 'info'); return; }
+      const callId = document.getElementById('modalCallId').value.trim();
+      const displayName = document.getElementById('modalCallName').value.trim();
       const fd = new FormData();
       for (const f of files) fd.append('files', f);
       fd.append('call_id', callId);
       fd.append('display_name', displayName);
+      const button = document.getElementById('btnModalIngest');
+      const stopProgress = startUploadProgress(button);
+      const activity = beginActivity({
+        title: 'Processing donor call',
+        detail: `Uploading and reading ${files.length} source document${files.length === 1 ? '' : 's'}…`,
+      });
+      notify('Upload started. Donor documents are being analysed.', 'info');
       try {
         const res = await fetch('/api/calls/ingest', { method: 'POST', body: fd });
         const body = await res.json();
         if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+        activity.update('Building the summary, requirements and donor rule preview…');
         document.getElementById('newProposalModal').style.display = 'none';
+        await showDonorCallSection(body.call_id);
         renderCallIngestResult(body);
-        loadCallDrafts();
-        showDonorCallSection();
+        activity.success(`${body.manifest_draft?.display_name || body.call_id} is ready for review.`);
+        notify(`${body.manifest_draft?.display_name || body.call_id} uploaded successfully.`, 'success');
       } catch (e) {
-        alert(`Ingest failed: ${e.message}`);
+        activity.fail(`Call processing failed: ${e.message}`);
+        notify(`Ingest failed: ${e.message}`, 'danger');
+      } finally {
+        stopProgress();
       }
     });
 
-    // Proposal Select & New
-    el.proposalSelect.addEventListener('change', e => {
-      if (e.target.value) loadProposal(e.target.value);
-    });
-    el.btnNewProposal.addEventListener('click', createNewProposal);
+    // Product navigation
     document.getElementById('btnLandingNew').addEventListener('click', createNewProposal);
+    document.getElementById('btnSightlineHome').addEventListener('click', navigateToSightline);
+    document.getElementById('btnProposalHome').addEventListener('click', goToProposalHome);
+    document.getElementById('btnDonorLibrary').addEventListener('click', () => {
+      showDonorCallSection(state.proposal?.donor || '');
+    });
+    document.getElementById('btnBackToProposals').addEventListener('click', renderLanding);
+    document.getElementById('btnToggleCallUpload').addEventListener('click', () => {
+      const panel = document.getElementById('callUploadPanel');
+      panel.hidden = !panel.hidden;
+      if (!panel.hidden) el.callFileInput.focus();
+    });
 
     // Advisor
     el.btnSendAdvisor.addEventListener('click', sendAdvisorMessage);
@@ -1605,8 +1672,6 @@
   async function init() {
     setupEventListeners();
     await loadDonors();
-    // Fill the header proposal dropdown (needed by the select-based flow)
-    await loadProposalsList();
     // Landing view first: existing proposals (view/delete) + New CTA
     await renderLanding();
   }
