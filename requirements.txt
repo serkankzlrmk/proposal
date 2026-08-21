@@ -1,7 +1,22 @@
+# ── Core ────────────────────────────────────────────────
 flask
 flask-cors
 httpx
 python-dotenv
+pydantic
+pyyaml
+
+# ── PDF engine ──────────────────────────────────────────
 typst
-pytest
 pymupdf
+
+# ── Tests ───────────────────────────────────────────────
+pytest
+
+# ── Sightline evidence bridge (optional) ────────────────
+# Only needed when SIGHTLINE_ROOT points at a local Sightline
+# checkout — Sightline's reliefweb_api modules import these.
+requests
+langchain
+langchain-core
+pypdf

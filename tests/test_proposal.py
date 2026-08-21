@@ -155,8 +155,21 @@ def test_typst_pdf_compilation():
     assert len(pdf_bytes) > 5000  # Valid multi-kilobyte PDF
 
 
-def test_api_endpoints(client):
-    """Verify all Flask REST endpoints."""
+def test_api_endpoints(client, monkeypatch):
+    """Verify all Flask REST endpoints.
+
+    Deterministic path: OPENROUTER_API_KEY is blanked so every generation
+    endpoint uses its structured fallback (zero network, no flake). The
+    endpoints' contract — status codes + payload shape — is what this test
+    locks.
+    """
+    # Force deterministic fallbacks (no live LLM, no network)
+    import engine.generator as generator_mod
+    import engine.verifier as verifier_mod
+
+    monkeypatch.setattr(generator_mod, "OPENROUTER_API_KEY", "")
+    monkeypatch.setattr(verifier_mod, "OPENROUTER_API_KEY", "")
+
     # 1. Donors
     r = client.get("/api/proposals/donors")
     assert r.status_code == 200
@@ -192,22 +205,28 @@ def test_api_endpoints(client):
     assert r.status_code == 200
     assert len(r.json["narrative_data"]) > 0
 
-    # 7. Verifier Audit
+    # 7. Deterministic analyze (scoring engine — no LLM involved)
+    r = client.post(f"/api/proposals/{prop_id}/analyze")
+    assert r.status_code == 200
+    assert "total_score" in r.json
+    assert "eligibility" in r.json
+
+    # 8. Verifier Audit (deterministic path)
     r = client.post(f"/api/proposals/{prop_id}/verify")
     assert r.status_code == 200
     assert "audit" in r.json
 
-    # 8. Advisor Chat
-    r = client.post(f"/api/proposals/{prop_id}/advisor/chat", json={"message": "Review my indicators"})
+    # 9. Advisor Chat (small-talk fast path — zero LLM cost)
+    r = client.post(f"/api/proposals/{prop_id}/advisor/chat", json={"message": "hello"})
     assert r.status_code == 200
     assert "message" in r.json
 
-    # 9. PDF Export
+    # 10. PDF Export
     r = client.get(f"/api/proposals/{prop_id}/export/pdf")
     assert r.status_code == 200
     assert r.headers["Content-Type"] == "application/pdf"
     assert len(r.data) > 5000
 
-    # 10. Delete
+    # 11. Delete
     r = client.delete(f"/api/proposals/{prop_id}")
     assert r.status_code == 200

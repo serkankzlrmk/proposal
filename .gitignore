@@ -38,5 +38,6 @@ donors/api_test_call.yaml
 donors/multi_format_call.yaml
 donors/call_mszo0ybr.yaml
 
-# NotebookLM MCP deneme kalintilari (proposal ile alakasiz)
+# NotebookLM MCP experiment leftovers (unrelated to proposal)
 nblm_*.py
+donors/grant_call_for_the_prevention_of_child_early_and_forced_marriages_cefm.yaml

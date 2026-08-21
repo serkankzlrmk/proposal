@@ -219,6 +219,17 @@ def test_evidence_bridge_zero_crash_when_sightline_missing(monkeypatch):
     assert ev.evidence_to_prompt({"source": "unavailable"}) == ""
 
 
+def test_evidence_bridge_disabled_when_root_unset(monkeypatch):
+    """Unset SIGHTLINE_ROOT must disable the bridge (no accidental cwd use)."""
+    import engine.evidence as ev
+
+    monkeypatch.setattr(ev, "SIGHTLINE_ROOT", Path(""))
+    monkeypatch.setattr(ev, "_loaded", False)
+    monkeypatch.setattr(ev, "_available", False)
+    assert ev.available() is False
+    assert ev.search_sitreps(country="Turkey") is None
+
+
 def test_evidence_prompt_rendering():
     """Evidence block renders only non-empty sources with citation hint."""
     from engine.evidence import evidence_to_prompt
@@ -302,7 +313,7 @@ def test_advisor_status_summary():
         "narrative_data": {"s1": "x", "s2": "y"}, "references": [{"id": "R1"}],
     }
     s = _proposal_status_summary(prop)
-    assert "step=4/6" in s
+    assert "step=4/5" in s
     assert "logframe_rows=1" in s
     assert "narrative_sections=2" in s
     assert "references=1" in s

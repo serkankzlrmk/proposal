@@ -44,7 +44,7 @@ def _small_talk_reply(user_message: str, title: str, donor: str, country: str, s
     if any(g in msg for g in _GREETINGS):
         return (
             f"Hello! 👋 I'm your GMS Proposal Advisor. You're currently working on "
-            f"**'{title}'** ({donor}, {country}) — at **Step {step}/6**.\n\n"
+            f"**'{title}'** ({donor}, {country}) — at **Step {step}/5**.\n\n"
             f"Ask me anything: whether an indicator is SMART, whether the budget fits the cap, "
             f"which section is weak, or just say 'fix it' and I'll propose an action. How shall we proceed?"
         )
@@ -68,7 +68,7 @@ def _proposal_status_summary(proposal: Dict[str, Any]) -> str:
     nar_count = len(narrative) if isinstance(narrative, dict) else 0
     refs = proposal.get("references") or []
     return (
-        f"Proposal: '{title}' | donor={donor} | country={country} | step={step}/6 | "
+        f"Proposal: '{title}' | donor={donor} | country={country} | step={step}/5 | "
         f"logframe_rows={len(matrix)} | narrative_sections={nar_count} | references={len(refs)}"
     )
 

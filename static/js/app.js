@@ -81,7 +81,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
     advisorMessages: document.getElementById('advisorMessages'),
     advisorInput: document.getElementById('advisorInput'),
     btnSendAdvisor: document.getElementById('btnSendAdvisor'),
-    // Step 6: Donor Call Ingestion
+    // Donor Call Ingestion
     callFileInput: document.getElementById('callFileInput'),
     callIdInput: document.getElementById('callIdInput'),
     callNameInput: document.getElementById('callNameInput'),
@@ -861,7 +861,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
     }
   }
 
-  // ── Step 6: Donor Call Ingestion ────────────────────────────────────────
+  // ── Donor Call Ingestion ────────────────────────────────────────────────
   async function handleIngestCall() {
     const files = el.callFileInput.files;
     if (!files || !files.length) { notify('Select at least one donor call document (PDF, DOCX or Markdown).', 'info'); return; }
@@ -1597,7 +1597,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
     document.getElementById('btnAgentBudget').addEventListener('click', handleAgentBudget);
     document.getElementById('btnAgentNarrative').addEventListener('click', handleGenerateNarrative);
 
-    // Step 6: Donor Call Ingestion
+    // Donor Call Ingestion
     el.btnIngestCall.addEventListener('click', handleIngestCall);
 
     // New Proposal modal

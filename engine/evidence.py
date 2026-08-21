@@ -31,8 +31,11 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 SIGHTLINE_ROOT = Path(
-    __import__("os").getenv("SIGHTLINE_ROOT", "~/Documents/reliefweb/RedAgent")
+    __import__("os").getenv("SIGHTLINE_ROOT", "")
 ).expanduser()
+
+if not str(SIGHTLINE_ROOT):
+    logger.info("SIGHTLINE_ROOT is not set — evidence bridge disabled")
 
 # ── Country helpers (shared by generator + blueprint) ─────────────────────
 _COUNTRY_CODES = {
@@ -90,8 +93,8 @@ def _ensure_loaded() -> bool:
     if _loaded:
         return _available
     _loaded = True
-    if not SIGHTLINE_ROOT.exists():
-        logger.info("Sightline root not found at %s — evidence bridge disabled", SIGHTLINE_ROOT)
+    if not str(SIGHTLINE_ROOT) or not SIGHTLINE_ROOT.exists():
+        logger.info("Sightline root not found (SIGHTLINE_ROOT=%s) — evidence bridge disabled", SIGHTLINE_ROOT or "<unset>")
         return False
     try:
         # Load Sightline's env (HDX_APP_IDENTIFIER etc.) without touching ours

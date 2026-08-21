@@ -1,43 +1,43 @@
-# Proposal — Mimari İlkeler (Architecture Principles)
+# Architecture Principles
 
-> Bu doküman proposal sisteminin geliştirme kurallarını tanımlar.
-> **Kritik kural: proposal, Sightline'dan bağımsız bir projedir.**
+> Development rules for Proposal Studio. **Critical rule: Proposal Studio is an
+> independent project — it never imports, copies, or modifies Sightline code.**
 
-## 1. Bağımsızlık (İlk Kural)
+## 1. Independence (First Rule)
 
-- Proposal, Sightline (RedAgent) **kodunu import etmez, kopyalamaz, değiştirmez.**
-- Sightline deposuna bu projeden **hiçbir dosya yazılmaz.**
-- Sightline'ın testleri, deploy'u, veritabanları bu projeden **etkilenmez.**
-- Geliştirme aşamaları (branches, PR'lar, commit'ler) **tamamen ayrı** yürür.
+- Proposal Studio never imports, copies, or modifies Sightline (RedAgent) code.
+- No file from this project is ever written into the Sightline repository.
+- Sightline's tests, deployments, and databases are never affected by this project.
+- Development (branches, PRs, commits) runs fully separate.
 
-## 2. Sightline ile Uyumluluk (İleride Entegrasyon İçin)
+## 2. Sightline Compatibility (For Future Integration)
 
-Sistem ileride Sightline'a **ayrı modül olarak** eklenecektir. Bu yüzden:
+The system will later be added to Sightline as a separate module. Therefore:
 
-- Veri kaynağı katmanı (`data_sources/`), Sightline'ın `reliefweb_api/` deseniyle
-  **birebir uyumlu** tasarlanır:
-  - Her kaynak: `<name>_client.py` (singleton HTTP client, SimpleCache, rate limit, timeout)
-  - Her kaynak: `<name>_tools.py` (fonksiyonlar)
-  - Ortak desenler `reliefweb_config.py` benzeri tek bir yerde
-- Endpoint isimleri ve veri yapıları, Sightline'a taşınırken değişiklik gerektirmeyecek
-  şekilde seçilir.
-- **Taşıma anında**: proposal'daki `data_sources/` modülü, Sightline'ın `reliefweb_api/`
-  klasörüne bütün olarak taşınabilir olmalı (import path'leri göreli kalır).
+- The evidence layer (`engine/evidence.py`) matches Sightline's `reliefweb_api/`
+  pattern 1-to-1, so it can be moved as a whole when integration happens.
+- Endpoint names and data structures are chosen so the move requires no changes.
+- **At migration time:** delete the bridge and import `reliefweb_api` directly —
+  it will already be in the same process. The bridge is the ONLY file that
+  touches Sightline paths.
 
-## 3. UI Dili
+## 3. UI Language
 
-- UI'da **TÜRKÇE metin YOK** (placeholder, hata mesajı, badge dahil — her şey İngilizce).
-- Tasarım dili: Sightline'ın Apple Liquid Glass sistemi (ileride birebir eşleşecek).
+- **No Turkish text in the UI** (placeholders, error messages, badges — everything
+  is English).
+- Design language: Sightline's Liquid Glass system (matching over time).
 
-## 4. Gözlemlenebilirlik (LLM-Ops)
+## 4. Observability (LLM-Ops)
 
-- Her AI aksiyonu (generate, verify, advisor, export) bir trace event'i üretir.
-- Token kullanımı kalıcı `usage.jsonl` ledger'ına yazılır (tokens = ground truth).
-- Bu katman Waku'nun `ops/tracing.py` deseniyle uyumludur.
+- Every AI action (generate, verify, advisor, export) produces a trace event.
+- Token usage is written to the persistent `ops/usage.jsonl` ledger
+  (tokens = ground truth).
+- This layer follows the Waku `ops/tracing.py` pattern.
 
-## 5. Kalite Standartları
+## 5. Quality Standards
 
-- Her değişiklik testlerle gelir: `pytest tests/ -v` hepsi yeşil olmadan commit yok.
-- Commit mesajları: konu + neden (WHY), 70 karakter altı.
-- Büyük refactor/kaldırma işleri ayrı branch'te yürür, kullanıcı onayı olmadan
-  main'e push yok.
+- Every change ships with tests: `pytest tests/ -v` must be green before commit.
+- Commit messages: subject + reason (WHY), under 70 characters.
+- Major refactors run on a dedicated branch; no push to main without user approval.
+- Human-in-the-loop: the LLM drafts, the deterministic engine decides, the user
+  approves at every gate.
