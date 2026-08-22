@@ -10,8 +10,29 @@ from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
-OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+# Prefer env-driven output dir (Sightline sets OUTPUT_DIR=/app/output in the
+# embedded deployment). Fallback to the repo-local output/ for standalone runs.
+_OUTPUT_DIR_ENV = os.getenv("OUTPUT_DIR", "")
+OUTPUT_DIR = Path(_OUTPUT_DIR_ENV) if _OUTPUT_DIR_ENV else (Path(__file__).resolve().parent.parent / "output")
+
+
+def _ensure_output_dir() -> Path:
+    """Create OUTPUT_DIR lazily (only on first PDF write, not at import time).
+
+    The embedded deployment mounts the proposal repo read-only (:/app/proposal:ro),
+    so an import-time mkdir would raise EROFS. Deferring to first write keeps
+    the repo mount read-only and points output at the writable Sightline volume.
+    """
+    try:
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        # Repo mount is read-only (embedded mode) — fall back to a temp dir.
+        import tempfile
+
+        _tmp = Path(tempfile.gettempdir()) / "proposal_output"
+        _tmp.mkdir(parents=True, exist_ok=True)
+        return _tmp
+    return OUTPUT_DIR
 
 
 def escape_typst(text: Any) -> str:
@@ -461,7 +482,7 @@ def compile_pdf(proposal: Dict[str, Any], output_path: Optional[str] = None, ana
         temp_typ_path = f.name
 
     try:
-        dest = output_path or str(OUTPUT_DIR / f"{prop_id}.pdf")
+        dest = output_path or str(_ensure_output_dir() / f"{prop_id}.pdf")
         pdf_bytes = typst.compile(temp_typ_path, output=dest)
         if not pdf_bytes and os.path.exists(dest):
             with open(dest, "rb") as rf:
