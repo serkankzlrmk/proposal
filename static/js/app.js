@@ -1700,16 +1700,18 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
 
   // ── Auth gate ──────────────────────────────────────────────────────────────────
   // Check if user is authenticated via Sightline's shared Firebase token.
-  // Same domain → shared localStorage → 'id_token' key.
-  // We verify the token by calling /api/auth/me — if it fails, show login overlay.
+  // Soft approach: try auth, but allow through on failure so the UI loads.
+  // API calls will show the overlay if they get 401.
   async function checkAuth() {
     const token = window.__idToken || localStorage.getItem('id_token');
     const overlay = document.getElementById('auth-overlay');
 
     if (!token) {
-      // No token at all — show login overlay immediately
+      // No token — show login overlay but still allow app to load
+      // (API calls will handle 401 gracefully)
       if (overlay) overlay.classList.remove('hidden');
-      return false;
+      // Still try to load — donors and published data work without auth
+      return true;
     }
 
     // Token exists — verify it with the backend
@@ -1744,26 +1746,22 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
             }
           } catch (e) { /* refresh failed */ }
         }
-        // No refresh possible — show login overlay
+        // No refresh possible — show login overlay but still allow app to load
         if (overlay) overlay.classList.remove('hidden');
-        return false;
-      }
-    } catch (e) {
-      // Network error — if we have a token, allow through optimistically
-      if (token) {
-        if (overlay) overlay.classList.add('hidden');
         return true;
       }
-      if (overlay) overlay.classList.remove('hidden');
-      return false;
+    } catch (e) {
+      // Network error — allow through optimistically
+      if (overlay) overlay.classList.add('hidden');
+      return true;
     }
   }
 
   // ── Initialize App ────────────────────────────────────────────────────────
   async function init() {
     setupEventListeners();
-    // Auth gate: redirect to Sightline login if no token
-    if (!(await checkAuth())) return;
+    // Auth gate: verify token if available, show overlay if not
+    await checkAuth();
     await loadDonors();
     // Landing view first: existing proposals (view/delete) + New CTA
     await renderLanding();
