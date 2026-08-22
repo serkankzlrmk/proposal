@@ -8,8 +8,8 @@
 function _getIdToken() {
   // 1. Direct — Sightline's auth.js sets window.__idToken after sign-in
   if (window.__idToken) return window.__idToken;
-  // 2. localStorage — Sightline persists the token here
-  const stored = localStorage.getItem('sightline_idToken');
+  // 2. localStorage — Sightline persists the token as 'id_token'
+  const stored = localStorage.getItem('id_token');
   if (stored) return stored;
   return '';
 }

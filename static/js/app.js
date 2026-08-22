@@ -1677,26 +1677,59 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
   }
 
   // ── Auth gate ──────────────────────────────────────────────────────────────────
-  // Check if user is authenticated. If not, show login overlay.
-  // Same domain as Sightline → shared localStorage → same Firebase ID token.
-  function checkAuth() {
-    const token = window.__idToken || localStorage.getItem('sightline_idToken');
+  // Check if user is authenticated via Sightline's shared Firebase token.
+  // Same domain → shared localStorage → 'id_token' key.
+  // We verify the token by calling /api/auth/me — if it fails, show login overlay.
+  async function checkAuth() {
+    const token = window.__idToken || localStorage.getItem('id_token');
     const overlay = document.getElementById('auth-overlay');
+
     if (!token) {
-      // Not authenticated — show login overlay
+      // No token at all — show login overlay immediately
       if (overlay) overlay.classList.remove('hidden');
       return false;
     }
-    // Authenticated — hide overlay if shown
-    if (overlay) overlay.classList.add('hidden');
-    return true;
+
+    // Token exists — verify it with the backend
+    try {
+      const res = await fetch('/api/auth/me', {
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+      if (res.ok) {
+        const user = await res.json();
+        window.__currentUser = user;
+        window.__idToken = token;
+        if (overlay) overlay.classList.add('hidden');
+        return true;
+      } else {
+        // Token expired or invalid — try refresh via Sightline
+        if (window.refreshIdToken) {
+          try {
+            const fresh = await window.refreshIdToken();
+            if (fresh) {
+              window.__idToken = fresh;
+              localStorage.setItem('id_token', fresh);
+              if (overlay) overlay.classList.add('hidden');
+              return true;
+            }
+          } catch (e) { /* refresh failed */ }
+        }
+        // No refresh possible — show login overlay
+        if (overlay) overlay.classList.remove('hidden');
+        return false;
+      }
+    } catch (e) {
+      // Network error — allow through, overlay stays hidden
+      if (overlay) overlay.classList.add('hidden');
+      return true;
+    }
   }
 
   // ── Initialize App ────────────────────────────────────────────────────────
   async function init() {
     setupEventListeners();
     // Auth gate: redirect to Sightline login if no token
-    if (!checkAuth()) return;
+    if (!(await checkAuth())) return;
     await loadDonors();
     // Landing view first: existing proposals (view/delete) + New CTA
     await renderLanding();
