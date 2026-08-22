@@ -23,16 +23,6 @@ import logging
 from flask import Blueprint, jsonify, request
 
 try:
-    from db import get_proposal, lock_step, update_proposal
-    from engine.models import (
-        BudgetItem,
-        PseaCommitments,
-        RiskMatrixItem,
-        compute_budget_summary,
-    )
-    from engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine
-    from engine.donor_resolver import resolve_donor_id
-except ImportError:
     from proposal.db import get_proposal, lock_step, update_proposal
     from proposal.engine.models import (
         BudgetItem,
@@ -43,6 +33,16 @@ except ImportError:
     from proposal.engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine
     from proposal.engine.donor_resolver import resolve_donor_id
 
+except ImportError:
+    from db import get_proposal, lock_step, update_proposal
+    from engine.models import (
+        BudgetItem,
+        PseaCommitments,
+        RiskMatrixItem,
+        compute_budget_summary,
+    )
+    from engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine
+    from engine.donor_resolver import resolve_donor_id
 logger = logging.getLogger(__name__)
 
 step4_api_bp = Blueprint("step4_budget_risk", __name__, url_prefix="/api/proposal-v2/steps/4")
@@ -60,9 +60,9 @@ def _call_llm(prompt: str, system_prompt: str = "", temperature: float = 0.3) ->
     import time
 
     try:
-        from config import OPENROUTER_API_KEY, LLM_BASE_URL, LLM_MODEL
-    except ImportError:
         from proposal.config import OPENROUTER_API_KEY, LLM_BASE_URL, LLM_MODEL
+    except ImportError:
+        from config import OPENROUTER_API_KEY, LLM_BASE_URL, LLM_MODEL
     if not OPENROUTER_API_KEY:
         return ""
     headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
@@ -75,6 +75,11 @@ def _call_llm(prompt: str, system_prompt: str = "", temperature: float = 0.3) ->
         "temperature": temperature,
     }
     try:
+        logger.warning("LLM call failed: %s", e)
+        return ""
+
+
+    except Exception as e:
         t0 = time.time()
         with httpx.Client(timeout=60.0) as client:
             resp = client.post(f"{LLM_BASE_URL}/chat/completions", headers=headers, json=payload)
@@ -85,13 +90,12 @@ def _call_llm(prompt: str, system_prompt: str = "", temperature: float = 0.3) ->
             from ops.tracing import log_llm_call
             log_llm_call("step4_generate", LLM_MODEL, len(prompt), len(content), None, (time.time() - t0) * 1000)
         except Exception:
-            pass
+            try:
+                from proposal.ops.tracing import log_llm_call
+                log_llm_call("step4_generate", LLM_MODEL, len(prompt), len(content), None, (time.time() - t0) * 1000)
+            except Exception:
+                pass
         return content or ""
-    except Exception as e:
-        logger.warning("LLM call failed: %s", e)
-        return ""
-
-
 def _resolve_donor(prop) -> str:
     return resolve_donor_id(prop.get("donor", "OCHA_CBPF"))
 
@@ -102,10 +106,10 @@ def _risk_report(risk_rows) -> dict:
     issues = []
     for row in risk_rows or []:
         try:
-            r = row if isinstance(row, RiskMatrixItem) else RiskMatrixItem(**row)
-        except Exception as e:
             issues.append({"row": row, "error": f"Invalid risk row: {e}"})
             continue
+        except Exception as e:
+            r = row if isinstance(row, RiskMatrixItem) else RiskMatrixItem(**row)
         risk = {
             **r.model_dump(),
             "severity_score": r.severity_score,
@@ -268,6 +272,9 @@ LANGUAGE POLICY: ALWAYS respond in English.
     risks = []
     if raw:
         try:
+            logger.warning("Risk JSON parse failed: %s", e)
+
+        except Exception as e:
             clean = raw.strip()
             if clean.startswith("```"):
                 clean = clean.split("\n", 1)[1].rsplit("```", 1)[0].strip()
@@ -282,9 +289,6 @@ LANGUAGE POLICY: ALWAYS respond in English.
                     "impact": int(item.get("impact", 2) or 2),
                     "mitigation_strategy": item.get("mitigation_strategy", ""),
                 })
-        except Exception as e:
-            logger.warning("Risk JSON parse failed: %s", e)
-
     if not risks:
         # Deterministic fallback: one row per category
         risks = [
@@ -323,15 +327,15 @@ def generate_budget():
     currency = "USD"
     budget_max = None
     try:
+        pass
+
+    except Exception:
         from engine.yaml_rules import YamlDonorRuleLoader
         loader = YamlDonorRuleLoader()
         manifest = loader.load(donor)
         if manifest:
             currency = manifest.currency or "USD"
             budget_max = manifest.budget_max
-    except Exception:
-        pass
-
     prompt = f"""
 Draft an itemized budget for a humanitarian proposal in {country} ({theme}) for donor {donor}.
 Budget currency: {currency}. Budget ceiling: {budget_max or 'not specified'} {currency} max — MUST NOT exceed.
@@ -344,6 +348,9 @@ LANGUAGE POLICY: ALWAYS respond in English.
     items = []
     if raw:
         try:
+            logger.warning("Budget JSON parse failed: %s", e)
+
+        except Exception as e:
             clean = raw.strip()
             if clean.startswith("```"):
                 clean = clean.split("\n", 1)[1].rsplit("```", 1)[0].strip()
@@ -358,9 +365,6 @@ LANGUAGE POLICY: ALWAYS respond in English.
                     "unit_count": float(item.get("unit_count", 1) or 1),
                     "unit_cost": float(item.get("unit_cost", 0) or 0),
                 })
-        except Exception as e:
-            logger.warning("Budget JSON parse failed: %s", e)
-
     if not items:
         items = [
             {"category": "personnel", "description": "Project Manager", "unit_type": "month", "unit_count": 12, "unit_cost": 2500},

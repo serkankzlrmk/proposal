@@ -29,16 +29,6 @@ from flask import Blueprint, jsonify, request
 from auth import current_uid, require_auth, require_role, optional_auth
 
 try:
-    from config import DB_PATH
-    from engine.call_ingest import (
-        extract_document_text,
-        extract_requirements,
-        build_manifest_draft,
-        save_manifest,
-        DONORS_DIR,
-    )
-    from engine.models import DonorManifest
-except ImportError:
     from proposal.config import DB_PATH
     from proposal.engine.call_ingest import (
         extract_document_text,
@@ -49,6 +39,16 @@ except ImportError:
     )
     from proposal.engine.models import DonorManifest
 
+except ImportError:
+    from config import DB_PATH
+    from engine.call_ingest import (
+        extract_document_text,
+        extract_requirements,
+        build_manifest_draft,
+        save_manifest,
+        DONORS_DIR,
+    )
+    from engine.models import DonorManifest
 logger = logging.getLogger(__name__)
 
 call_ingest_bp = Blueprint("call_ingest", __name__, url_prefix="/api/calls")
@@ -99,6 +99,9 @@ def _generate_brief(corpus: str, extracted: Dict[str, Any], draft: Dict[str, Any
     extraction_used_fallback = extracted.get("extraction_mode") == "deterministic"
     if not extraction_used_fallback:
         try:
+            logger.warning("Brief generation failed: %s", e)
+
+        except Exception as e:
             from engine.generator import _call_llm
 
             reqs = "\n".join(f"- {r}" for r in (extracted.get("requirements") or [])[:12])
@@ -129,9 +132,6 @@ def _generate_brief(corpus: str, extracted: Dict[str, Any], draft: Dict[str, Any
             )
             if raw and raw.strip():
                 return raw.strip()[:6000]
-        except Exception as e:
-            logger.warning("Brief generation failed: %s", e)
-
     # Deterministic fallback
     reqs = "\n".join(f"- {r}" for r in (extracted.get("requirements") or [])[:10]) or "- (none extracted)"
     return (
@@ -154,6 +154,9 @@ def _generate_call_identity(corpus: str, extracted: Dict[str, Any]) -> Dict[str,
     summary = str(extracted.get("summary") or "").strip()
     if extracted.get("extraction_mode") != "deterministic":
         try:
+            logger.warning("Call identity generation failed: %s", e)
+
+        except Exception as e:
             from engine.generator import _call_llm
 
             raw = _call_llm(
@@ -179,9 +182,6 @@ def _generate_call_identity(corpus: str, extracted: Dict[str, Any]) -> Dict[str,
                 call_id = _slug_call_id(str(parsed.get("call_id") or name))
                 if name:
                     return {"display_name": name, "call_id": call_id}
-        except Exception as e:
-            logger.warning("Call identity generation failed: %s", e)
-
     # Deterministic fallback still derives the label from the uploaded content.
     call_title_match = re.search(
         r"(?im)^\s*((?:grant|funding|open)\s+call[^\n]{0,160})$",
@@ -318,9 +318,9 @@ def list_drafts():
     for r in rows:
         d = dict(r)
         try:
-            d["documents"] = json.loads(d.pop("documents_json") or "[]")
-        except Exception:
             d["documents"] = []
+        except Exception:
+            d["documents"] = json.loads(d.pop("documents_json") or "[]")
         out.append(d)
     return jsonify({"drafts": out})
 
@@ -340,9 +340,9 @@ def get_draft(draft_id: str):
     d["manifest"] = json.loads(d.pop("manifest_json") or "{}")
     d["requirements"] = json.loads(d.pop("requirements_json") or "[]")
     try:
-        d["documents"] = json.loads(d.pop("documents_json") or "[]")
-    except Exception:
         d["documents"] = []
+    except Exception:
+        d["documents"] = json.loads(d.pop("documents_json") or "[]")
     return jsonify({"draft": d})
 
 
@@ -359,10 +359,10 @@ def update_draft(draft_id: str):
 
     # Validate shape early (before store) — catches broken user edits
     try:
-        DonorManifest(**manifest)
-    except Exception as e:
         return jsonify({"error": f"Manifest validation failed: {e}"}), 422
 
+    except Exception as e:
+        DonorManifest(**manifest)
     conn = _conn()
     try:
         cur = conn.execute(
@@ -451,10 +451,10 @@ def publish_draft(draft_id: str):
     manifest = json.loads(d["manifest_json"] or "{}")
 
     try:
-        path = save_manifest(d["call_id"], manifest)
-    except Exception as e:
         return jsonify({"error": f"Manifest validation failed: {e}"}), 422
 
+    except Exception as e:
+        path = save_manifest(d["call_id"], manifest)
     conn = _conn()
     try:
         conn.execute(

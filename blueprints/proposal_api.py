@@ -11,24 +11,6 @@ from flask import Blueprint, jsonify, request, send_file, g
 from auth import current_uid, current_role, require_auth, optional_auth, require_role
 
 try:
-    from db import (
-        list_proposals,
-        get_proposal,
-        create_proposal,
-        update_proposal,
-        delete_proposal,
-        save_review,
-        get_reviews,
-        ProposalLockedError,
-    )
-    from engine.donor_rules import DONOR_PROFILES, get_donor_profile
-    from engine.generator import generate_toc, generate_logframe, generate_narrative_sections
-    from engine.verifier import run_blind_verifier
-    from engine.advisor import advisor_chat
-    from engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine, get_rule_engine
-    from engine.donor_resolver import resolve_donor_id
-    from typst_engine.compiler import compile_pdf
-except ImportError:
     from proposal.db import (
         list_proposals,
         get_proposal,
@@ -47,6 +29,24 @@ except ImportError:
     from proposal.engine.donor_resolver import resolve_donor_id
     from proposal.typst_engine.compiler import compile_pdf
 
+except ImportError:
+    from db import (
+        list_proposals,
+        get_proposal,
+        create_proposal,
+        update_proposal,
+        delete_proposal,
+        save_review,
+        get_reviews,
+        ProposalLockedError,
+    )
+    from engine.donor_rules import DONOR_PROFILES, get_donor_profile
+    from engine.generator import generate_toc, generate_logframe, generate_narrative_sections
+    from engine.verifier import run_blind_verifier
+    from engine.advisor import advisor_chat
+    from engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine, get_rule_engine
+    from engine.donor_resolver import resolve_donor_id
+    from typst_engine.compiler import compile_pdf
 logger = logging.getLogger(__name__)
 
 proposal_api_bp = Blueprint("proposal_api", __name__, url_prefix="/api/proposals")
@@ -182,11 +182,11 @@ def new_proposal():
 
     if not country and donor:
         try:
-            loader = YamlDonorRuleLoader()
-            country = _manifest_country(loader.load(resolve_donor_id(donor, loader)))
-        except Exception as e:
             logger.debug("Proposal country could not be inferred from donor manifest: %s", e)
 
+        except Exception as e:
+            loader = YamlDonorRuleLoader()
+            country = _manifest_country(loader.load(resolve_donor_id(donor, loader)))
     context_data = data.get("context_data", {
         "country": country,
         "theme": theme,
@@ -246,9 +246,9 @@ def autosave_proposal(proposal_id: str):
     data = request.get_json(force=True, silent=True) or {}
     user_id = uid
     try:
-        updated = update_proposal(proposal_id, data, user_id=user_id)
-    except ProposalLockedError as e:
         return jsonify({"error": str(e), "code": "STEP_LOCKED"}), 409
+    except ProposalLockedError as e:
+        updated = update_proposal(proposal_id, data, user_id=user_id)
     if not updated:
         return jsonify({"error": "Proposal not found or update failed"}), 404
     return jsonify({"proposal": updated})
@@ -294,6 +294,9 @@ def handle_generate_context(proposal_id: str):
     manifest_block = ""
     manifest = None
     try:
+        logger.warning("Manifest context failed: %s", e)
+
+    except Exception as e:
         from engine.yaml_rules import YamlDonorRuleLoader
         from engine.donor_resolver import resolve_donor_id
 
@@ -308,12 +311,11 @@ def handle_generate_context(proposal_id: str):
                 f"Mandatory keywords: {', '.join(manifest.mandatory_keywords) or 'none'}\n"
                 f"Mandatory sections: {', '.join(manifest.mandatory_sections) or 'none'}"
             )
-    except Exception as e:
-        logger.warning("Manifest context failed: %s", e)
-
     # ── Live evidence (Sightline bridge) ────────────────────────────────────
     evidence_block = ""
     try:
+        logger.info("Evidence collection exceeded 8s; continuing with donor manifest context")
+    except FuturesTimeoutError:
         from engine.evidence import collect_evidence, evidence_to_prompt, ascii_country, country_code_for
 
         future = _evidence_executor.submit(
@@ -324,8 +326,6 @@ def handle_generate_context(proposal_id: str):
         )
         ev = future.result(timeout=8.0)
         evidence_block = evidence_to_prompt(ev, max_chars=2500)
-    except FuturesTimeoutError:
-        logger.info("Evidence collection exceeded 8s; continuing with donor manifest context")
     except Exception as e:
         logger.debug("Evidence collection skipped: %s", e)
 
@@ -358,6 +358,9 @@ def handle_generate_context(proposal_id: str):
     )
     if raw:
         try:
+            logger.warning("Context draft unparseable: %s", e)
+
+        except Exception as e:
             clean = raw.strip()
             if clean.startswith("```"):
                 clean = clean.split("\n", 1)[1].rsplit("```", 1)[0].strip()
@@ -370,9 +373,6 @@ def handle_generate_context(proposal_id: str):
                         new_ctx[k] = parsed[k]
                 update_proposal(proposal_id, {"context_data": new_ctx, "title": parsed.get("title") or prop.get("title")})
                 return jsonify({"status": "ok", "context_data": new_ctx, "title": parsed.get("title") or prop.get("title")})
-        except Exception as e:
-            logger.warning("Context draft unparseable: %s", e)
-
     parsed = _deterministic_context_draft(prop, ctx, manifest)
     new_ctx = dict(ctx)
     for key in (
@@ -455,6 +455,9 @@ def handle_generate_narrative(proposal_id: str):
 
     # ── Evidence -> citation registry (Sightline bridge, no code move) ─────
     try:
+        logger.warning("Evidence registration skipped: %s", e)
+
+    except Exception as e:
         from engine.evidence import (
             collect_evidence,
             evidence_to_references,
@@ -476,9 +479,6 @@ def handle_generate_narrative(proposal_id: str):
             if added:
                 update_proposal(proposal_id, {"references": registry + added})
                 logger.info("Registered %d evidence references (SIGHTLINE bridge)", len(added))
-    except Exception as e:
-        logger.warning("Evidence registration skipped: %s", e)
-
     narrative_data = generate_narrative_sections(logframe, ctx, donor=donor)
     updated = update_proposal(proposal_id, {"narrative_data": narrative_data, "step": 4})
     return jsonify({"status": "ok", "narrative_data": narrative_data, "proposal": updated})
@@ -570,6 +570,10 @@ def handle_advisor_chat(proposal_id: str):
 
     # Build AdvisorContext from the deterministic engine (Step B)
     try:
+        logger.warning("AdvisorContext build failed (%s); falling back to plain chat", e)
+        advisor_ctx = None
+
+    except Exception as e:
         from engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine
         from engine.advisor_context import AdvisorContextBuilder
 
@@ -581,10 +585,6 @@ def handle_advisor_chat(proposal_id: str):
 
         builder = AdvisorContextBuilder(yaml_donor, manifest)
         advisor_ctx = builder.build(engine_result, prop)
-    except Exception as e:
-        logger.warning("AdvisorContext build failed (%s); falling back to plain chat", e)
-        advisor_ctx = None
-
     result = advisor_chat(prop, user_msg, chat_history=history, advisor_ctx=advisor_ctx)
     return jsonify(result)
 

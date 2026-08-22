@@ -15,16 +15,16 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 try:
-    from config import OPENROUTER_API_KEY, LLM_BASE_URL, LLM_MODEL
-    from ops.tracing import log_llm_call
-except ImportError:
     from proposal.config import OPENROUTER_API_KEY, LLM_BASE_URL, LLM_MODEL
     from proposal.ops.tracing import log_llm_call
+except ImportError:
+    from config import OPENROUTER_API_KEY, LLM_BASE_URL, LLM_MODEL
+    from ops.tracing import log_llm_call
 
 try:
-    from engine.advisor_context import AdvisorContext, build_advisor_system_prompt
-except ImportError:
     from proposal.engine.advisor_context import AdvisorContext, build_advisor_system_prompt
+except ImportError:
+    from engine.advisor_context import AdvisorContext, build_advisor_system_prompt
 
 logger = logging.getLogger(__name__)
 

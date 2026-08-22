@@ -11,9 +11,9 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 try:
-    from config import DB_PATH
+    from proposal.config import DB_PATH  # embedded (Sightline + bridge)
 except ImportError:
-    from proposal.config import DB_PATH
+    from config import DB_PATH  # standalone
 
 logger = logging.getLogger(__name__)
 _db_lock = threading.Lock()

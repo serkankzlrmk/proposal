@@ -21,13 +21,6 @@ import logging
 from flask import Blueprint, jsonify, request
 
 try:
-    from db import get_proposal, lock_step, update_proposal
-    from engine.models import iter_indicator_entries
-    from engine.smart_parser import parse_indicators_list, validate_indicators
-    from engine.generator import generate_logframe, project_logframe_to_matrix
-    from engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine
-    from engine.donor_resolver import resolve_donor_id
-except ImportError:
     from proposal.db import get_proposal, lock_step, update_proposal
     from proposal.engine.models import iter_indicator_entries
     from proposal.engine.smart_parser import parse_indicators_list, validate_indicators
@@ -35,6 +28,13 @@ except ImportError:
     from proposal.engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine
     from proposal.engine.donor_resolver import resolve_donor_id
 
+except ImportError:
+    from db import get_proposal, lock_step, update_proposal
+    from engine.models import iter_indicator_entries
+    from engine.smart_parser import parse_indicators_list, validate_indicators
+    from engine.generator import generate_logframe, project_logframe_to_matrix
+    from engine.yaml_rules import YamlDonorRuleLoader, DonorScoringEngine
+    from engine.donor_resolver import resolve_donor_id
 logger = logging.getLogger(__name__)
 
 step3_api_bp = Blueprint("step3_logframe", __name__, url_prefix="/api/proposal-v2/steps/3")

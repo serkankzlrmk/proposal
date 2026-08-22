@@ -9,13 +9,13 @@ from typing import Any, Dict, List
 import httpx
 
 try:
-    from config import OPENROUTER_API_KEY, LLM_BASE_URL, VERIFIER_MODEL
-    from engine.donor_rules import get_donor_profile, validate_character_limits
-    from ops.tracing import log_llm_call
-except ImportError:
     from proposal.config import OPENROUTER_API_KEY, LLM_BASE_URL, VERIFIER_MODEL
     from proposal.engine.donor_rules import get_donor_profile, validate_character_limits
     from proposal.ops.tracing import log_llm_call
+except ImportError:
+    from config import OPENROUTER_API_KEY, LLM_BASE_URL, VERIFIER_MODEL
+    from engine.donor_rules import get_donor_profile, validate_character_limits
+    from ops.tracing import log_llm_call
 
 logger = logging.getLogger(__name__)
 
