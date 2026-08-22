@@ -4,14 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sightline — Proposal Design Pipeline & GMS Grant Engine</title>
-  <link rel="stylesheet" href="/static/css/proposal.css">
-  <link rel="stylesheet" href="/static/css/design/tokens.css">
-  <link rel="stylesheet" href="/static/css/design/shell.css">
-  <link rel="stylesheet" href="/static/css/design/components.css">
-  <link rel="stylesheet" href="/static/css/design/workspace.css">
-  <link rel="stylesheet" href="/static/css/design/donor-intelligence.css">
-  <link rel="stylesheet" href="/static/css/design/responsive.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/proposal.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/design/tokens.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/design/shell.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/design/components.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/design/workspace.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/design/donor-intelligence.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/design/responsive.css') }}">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📝</text></svg>">
+  {# Inject base path for JS — Caddy serves us under /proposal in production #}
+  <script>window.PROPOSAL_BASE_PATH = {{ config.PROPOSAL_BASE_PATH | tojson | safe }};</script>
 </head>
 <body>
 
@@ -27,7 +29,7 @@
   <header class="app-header">
     <div class="brand-group">
       <button id="btnSightlineHome" class="brand-home sightline-home" type="button" aria-label="Return to Sightline" data-shell-action="sightline-home">
-        <img class="brand-logo" src="/static/images/sightline-signal.webp" alt="" aria-hidden="true">
+        <img class="brand-logo" src="{{ url_for('static', filename='images/sightline-signal.webp') }}" alt="" aria-hidden="true">
         <span class="brand-copy">
           <span class="brand-title">Sightline</span>
         </span>
@@ -476,6 +478,6 @@
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
 
   <!-- Main Vanilla JS Coordinator -->
-  <script type="module" src="/static/js/app.js"></script>
+  <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

@@ -2,6 +2,19 @@ import { api, esc, notify, confirmAction, beginActivity, setButtonBusy } from '.
 import { applyStepLockState } from './modules/workspace-state.js';
 import { renderCallList, renderCallDetail } from './modules/donor-intelligence.js';
 
+// ── Base path for reverse-proxy deployment ──────────────────────────────────
+// Set by Flask template: window.PROPOSAL_BASE_PATH = '/proposal' or ''
+// In standalone mode (local dev), this is an empty string.
+const BASE = window.PROPOSAL_BASE_PATH || '';
+
+/**
+ * Prefix an API path with the base path.
+ * e.g. apiPath('/api/proposals') → '/proposal/api/proposals' in production
+ */
+function apiPath(path) {
+  return `${BASE}${path}`;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // proposal/static/js/app.js — Vanilla JS (ES6) Proposal Pipeline Coordinator
 // ═══════════════════════════════════════════════════════════════════════════
@@ -106,7 +119,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
     if (!state.activeProposalId) return;
     collectStep1Inputs();
     try {
-      const res = await api(`/api/proposals/${state.activeProposalId}`, {
+      const res = await api(apiPath(`/api/proposals/${state.activeProposalId}`), {
         method: 'PUT',
         body: JSON.stringify({
           title: state.proposal.title,
@@ -692,7 +705,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
     document.getElementById('donorCallSection').style.display = 'none';
     const listEl = document.getElementById('landingProposalsList');
     try {
-      const res = await api('/api/proposals');
+      const res = await api(apiPath('/api/proposals'));
       const props = res.proposals || [];
       if (!props.length) {
         listEl.innerHTML = `
@@ -747,7 +760,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
         if (!confirmed) return;
         const activity = beginActivity({ title: 'Deleting proposal', detail: 'Removing the proposal and its review history…' });
         try {
-          await api(`/api/proposals/${b.dataset.del}`, { method: 'DELETE' });
+          await api(apiPath(`/api/proposals/${b.dataset.del}`), { method: 'DELETE' });
           activity.success('Proposal deleted.');
           notify('Proposal deleted.', 'success');
           renderLanding();
@@ -774,7 +787,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
     // so the backend drafts for the country/theme the user actually typed.
     collectStep1Inputs();
     try {
-      await api(`/api/proposals/${state.activeProposalId}`, {
+      await api(apiPath(`/api/proposals/${state.activeProposalId}`), {
         method: 'PUT',
         body: JSON.stringify(state.proposal),
       });
@@ -786,7 +799,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
     setButtonBusy(el.btnAiGenerateContext, true);
     el.btnAiGenerateContext.textContent = 'Drafting context...';
     try {
-      const res = await api(`/api/proposals/${state.activeProposalId}/generate-context`, { method: 'POST' });
+      const res = await api(apiPath(`/api/proposals/${state.activeProposalId}/generate-context`), { method: 'POST' });
       activity.update('Applying the generated context to your workspace…');
       const ctx = res.context_data || {};
       if (res.title) el.inputTitle.value = res.title;
@@ -820,7 +833,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
     const activity = beginActivity({ title: 'Drafting risk register', detail: 'Identifying risks, assumptions and mitigations…' });
     setButtonBusy(btn, true); btn.textContent = 'Drafting risks...';
     try {
-      const res = await api(`/api/proposal-v2/steps/4/generate-risk`, {
+      const res = await api(apiPath(`/api/proposal-v2/steps/4/generate-risk`), {
         method: 'POST',
         body: JSON.stringify({ proposal_id: state.activeProposalId }),
       });
@@ -843,7 +856,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
     const activity = beginActivity({ title: 'Building proposal budget', detail: 'Aligning cost lines with the donor ceiling and rules…' });
     setButtonBusy(btn, true); btn.textContent = 'Drafting budget...';
     try {
-      const res = await api(`/api/proposal-v2/steps/4/generate-budget`, {
+      const res = await api(apiPath(`/api/proposal-v2/steps/4/generate-budget`), {
         method: 'POST',
         body: JSON.stringify({ proposal_id: state.activeProposalId }),
       });
@@ -879,7 +892,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
       for (const f of files) fd.append('files', f);
       fd.append('call_id', callId);
       fd.append('display_name', displayName);
-      const res = await fetch('/api/calls/ingest', { method: 'POST', body: fd });
+      const res = await fetch(apiPath('/api/calls/ingest'), { method: 'POST', body: fd });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
       activity.update('Building the summary, requirements and donor rule preview…');
@@ -942,7 +955,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
   async function publishDraft(draftId) {
     const activity = beginActivity({ title: 'Approving donor rules', detail: 'Validating the manifest before publication…' });
     try {
-      const res = await api(`/api/calls/drafts/${draftId}/publish`, { method: 'POST' });
+      const res = await api(apiPath(`/api/calls/drafts/${draftId}/publish`), { method: 'POST' });
       activity.update('Refreshing the approved source of truth…');
       notify(`Manifest published. The engine now scores against ${res.donor_id}.`, 'success');
       await loadCallDrafts(draftId);
@@ -957,7 +970,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
   async function rejectDraft(draftId) {
     const activity = beginActivity({ title: 'Rejecting extracted rules', detail: 'Updating the call review status…' });
     try {
-      await api(`/api/calls/drafts/${draftId}/reject`, { method: 'POST' });
+      await api(apiPath(`/api/calls/drafts/${draftId}/reject`), { method: 'POST' });
       notify('Call rules rejected. No proposal was created.', 'info');
       await loadCallDrafts(draftId);
       await viewCallIntelligence(draftId);
@@ -980,7 +993,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
 
     const activity = beginActivity({ title: 'Deleting donor call', detail: 'Checking proposal dependencies before removal…' });
     try {
-      await api(`/api/calls/drafts/${draftId}`, { method: 'DELETE' });
+      await api(apiPath(`/api/calls/drafts/${draftId}`), { method: 'DELETE' });
       state.activeCallDraftId = null;
       notify('Donor call deleted.', 'success');
       await loadCallDrafts();
@@ -995,7 +1008,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
     el.callIngestResult.classList.add('is-refreshing');
     el.callIngestResult.setAttribute('aria-busy', 'true');
     try {
-      const res = await api(`/api/calls/drafts/${draftId}`);
+      const res = await api(apiPath(`/api/calls/drafts/${draftId}`));
       const draft = res.draft || {};
       state.activeCallDraftId = draftId;
       renderCallDetail(el.callIngestResult, draft, callIntelligenceHandlers());
@@ -1020,7 +1033,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
 
   async function loadCallDrafts(preferredDraftId = '', preferredCallId = '') {
     try {
-      const res = await api('/api/calls/drafts');
+      const res = await api(apiPath('/api/calls/drafts'));
       const drafts = res.drafts || [];
       state.callDrafts = drafts;
       const preferred = drafts.find(draft => draft.id === preferredDraftId)
@@ -1076,7 +1089,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
     if (!state.activeProposalId) return;
     await saveCurrentState();
     try {
-      const res = await api(`/api/proposals/${state.activeProposalId}/analyze`, { method: 'POST' });
+      const res = await api(apiPath(`/api/proposals/${state.activeProposalId}/analyze`), { method: 'POST' });
       renderAnalysis(res);
       return res;
     } catch (e) {
@@ -1249,7 +1262,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
     setButtonBusy(el.btnSendAdvisor, true);
 
     try {
-      const res = await api(`/api/proposals/${state.activeProposalId}/advisor/chat`, {
+      const res = await api(apiPath(`/api/proposals/${state.activeProposalId}/advisor/chat`), {
         method: 'POST',
         body: JSON.stringify({ message: text, history }),
       });
@@ -1353,7 +1366,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
       collectStep1Inputs();
       await saveCurrentState();
       activity.update('Building the causal pathway from the saved context…');
-      const res = await api(`/api/proposals/${state.activeProposalId}/generate-toc`, { method: 'POST' });
+      const res = await api(apiPath(`/api/proposals/${state.activeProposalId}/generate-toc`), { method: 'POST' });
       state.proposal = res.proposal;
       renderToc();
       activity.success('Theory of Change generated and saved.');
@@ -1373,7 +1386,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
     setButtonBusy(el.btnAiGenerateLogframe, true);
     el.btnAiGenerateLogframe.textContent = 'Generating 4x4 Logframe...';
     try {
-      const res = await api(`/api/proposals/${state.activeProposalId}/generate-logframe`, { method: 'POST' });
+      const res = await api(apiPath(`/api/proposals/${state.activeProposalId}/generate-logframe`), { method: 'POST' });
       state.proposal = res.proposal;
       renderLogframe();
       activity.success('Logical framework generated and saved.');
@@ -1397,7 +1410,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
     el.btnAiGenerateNarrative.textContent = 'Preparing Narrative...';
     notify('Narrative preparation has started. You may continue working; the completed draft will be saved automatically.', 'info', 7600);
     try {
-      const res = await api(`/api/proposals/${state.activeProposalId}/generate-narrative`, { method: 'POST' });
+      const res = await api(apiPath(`/api/proposals/${state.activeProposalId}/generate-narrative`), { method: 'POST' });
       state.proposal = res.proposal;
       renderNarrative();
       activity.success('Narrative preparation is complete and the draft has been saved.');
@@ -1420,11 +1433,11 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
       await saveCurrentState();
       // Deterministic donor score analysis (YAML rules engine)
       activity.update('Checking eligibility gates, budget rules and required sections…');
-      const analysis = await api(`/api/proposals/${state.activeProposalId}/analyze`, { method: 'POST' });
+      const analysis = await api(apiPath(`/api/proposals/${state.activeProposalId}/analyze`), { method: 'POST' });
       renderAnalysis(analysis);
       // LLM blind verifier (semantic layer)
       activity.update('Running the final semantic quality review…');
-      const res = await api(`/api/proposals/${state.activeProposalId}/verify`, { method: 'POST' });
+      const res = await api(apiPath(`/api/proposals/${state.activeProposalId}/verify`), { method: 'POST' });
       state.proposal = res.proposal;
       renderVerifier();
       activity.success('Compliance audit complete.');
@@ -1442,14 +1455,14 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
     if (!state.activeProposalId) return;
     const activity = beginActivity({ title: 'Preparing proposal PDF', detail: 'Formatting the latest saved proposal for export…' });
     notify('PDF preparation started. Your download will begin shortly.', 'info');
-    window.location.href = `/api/proposals/${state.activeProposalId}/export/pdf`;
+    window.location.href = apiPath(`/api/proposals/${state.activeProposalId}/export/pdf`);
     window.setTimeout(() => activity.success('PDF export was sent to your downloads.'), 1400);
   }
 
   // ── Proposal Management ───────────────────────────────────────────────────
   async function loadProposal(id) {
     try {
-      const res = await api(`/api/proposals/${id}`);
+      const res = await api(apiPath(`/api/proposals/${id}`));
       state.activeProposalId = id;
       state.proposal = res.proposal;
       state.activeNarrativeTab = null;
@@ -1475,7 +1488,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
   async function createProposalWithDonor(donor, displayName = '') {
     const activity = beginActivity({ title: 'Creating proposal workspace', detail: 'Connecting the approved call rules to a new proposal…' });
     try {
-      const res = await api('/api/proposals/new', {
+      const res = await api(apiPath('/api/proposals/new'), {
         method: 'POST',
         body: JSON.stringify({
           title: displayName ? `${displayName} Proposal` : 'Untitled Proposal',
@@ -1499,7 +1512,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
 
   async function loadDonors() {
     try {
-      const res = await api('/api/proposals/donors');
+      const res = await api(apiPath('/api/proposals/donors'));
       state.donors = res.donors || {};
       // Donor profiles remain available for generation rules, but the user does
       // not choose from a ready-made list. The uploaded call owns this field.
@@ -1512,7 +1525,8 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
 
   async function navigateToSightline() {
     if (state.activeProposalId) await saveCurrentState();
-    const configuredHome = document.documentElement.dataset.sightlineHome || '';
+
+    // CustomEvent for host SPA integration (e.g. embedded iframe)
     const navigationEvent = new CustomEvent('sightline:navigate', {
       cancelable: true,
       detail: { target: 'home', source: 'proposal-studio' },
@@ -1520,15 +1534,15 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
     const handledByHost = !window.dispatchEvent(navigationEvent);
     if (handledByHost) return;
 
+    // If embedded in an iframe, postMessage to parent
     if (window.parent !== window) {
       window.parent.postMessage({ type: 'sightline:navigate', target: 'home', source: 'proposal-studio' }, '*');
       return;
     }
-    if (configuredHome) {
-      window.location.assign(configuredHome);
-      return;
-    }
-    notify('Sightline home navigation is ready for the host integration.', 'info');
+
+    // Standalone or reverse-proxy: navigate to Sightline home
+    const sightlineHome = BASE ? BASE.replace('/proposal', '') || '/' : '/';
+    window.location.assign(sightlineHome === '/' ? '/app' : sightlineHome);
   }
 
   async function goToProposalHome() {
@@ -1621,7 +1635,7 @@ import { renderCallList, renderCallDetail } from './modules/donor-intelligence.j
       });
       notify('Upload started. Donor documents are being analysed.', 'info');
       try {
-        const res = await fetch('/api/calls/ingest', { method: 'POST', body: fd });
+        const res = await fetch(apiPath('/api/calls/ingest'), { method: 'POST', body: fd });
         const body = await res.json();
         if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
         activity.update('Building the summary, requirements and donor rule preview…');

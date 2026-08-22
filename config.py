@@ -14,12 +14,12 @@ load_dotenv(PROJECT_ROOT / ".env")
 load_dotenv(BASE_DIR / ".env")
 
 PORT = int(os.getenv("PROPOSAL_PORT", "5002"))
-HOST = os.getenv("PROPOSAL_HOST", "127.0.0.1")
+HOST = os.getenv("PROPOSAL_HOST", "0.0.0.0")
 DEBUG = os.getenv("PROPOSAL_DEBUG", "true").lower() in ("1", "true", "yes")
 
 # Database Path
-DB_PATH = BASE_DIR / "data" / "proposal.db"
-OUTPUT_DIR = BASE_DIR / "output"
+DB_PATH = Path(os.getenv("DB_PATH", str(BASE_DIR / "data" / "proposal.db")))
+OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", str(BASE_DIR / "output")))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # LLM Configuration (Compatible with OpenRouter / OpenAI)
@@ -30,3 +30,11 @@ VERIFIER_MODEL = os.getenv("VERIFIER_MODEL", "google/gemini-2.5-pro")
 
 # Secret key for Flask sessions
 SECRET_KEY = os.getenv("SECRET_KEY", "proposal-design-secret-key-2026")
+
+# ── Path prefix for reverse-proxy deployment ──────────────────────────────────
+# When served under /proposal via Caddy, set PROPOSAL_BASE_PATH=/proposal
+# Standalone (local dev): leave empty or omit.
+PROPOSAL_BASE_PATH = os.getenv("PROPOSAL_BASE_PATH", "").rstrip("/")
+
+# Sightline evidence bridge — path to Sightline checkout for ReliefWeb/HDX imports
+SIGHTLINE_ROOT = os.getenv("SIGHTLINE_ROOT", "")
