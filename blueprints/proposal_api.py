@@ -6,7 +6,9 @@ import io
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-from flask import Blueprint, jsonify, request, send_file
+from flask import Blueprint, jsonify, request, send_file, g
+
+from auth import current_uid, current_role, require_auth, optional_auth, require_role
 
 try:
     from db import (
@@ -104,12 +106,14 @@ def _deterministic_context_draft(prop, ctx, manifest=None):
 
 
 @proposal_api_bp.route("/donors", methods=["GET"])
+@optional_auth
 def get_donors():
     """List available donor profiles and section constraints."""
     return jsonify({"donors": DONOR_PROFILES})
 
 
 @proposal_api_bp.route("/donors/yaml", methods=["GET"])
+@optional_auth
 def get_yaml_donors():
     """List YAML-driven donor manifests (from /donors/*.yaml)."""
     loader = YamlDonorRuleLoader()
@@ -117,6 +121,8 @@ def get_yaml_donors():
 
 
 @proposal_api_bp.route("/<proposal_id>/analyze", methods=["POST"])
+@require_auth
+@require_role("premium")
 def handle_analyze(proposal_id: str):
     """Deterministic scoring against the active donor YAML manifest.
 
@@ -133,18 +139,21 @@ def handle_analyze(proposal_id: str):
 
 
 @proposal_api_bp.route("", methods=["GET"])
+@require_auth
 def get_proposals_list():
     """List all proposals for the active user."""
-    user_id = request.args.get("user_id", "default_user")
+    user_id = current_uid() or request.args.get("user_id", "default_user")
     props = list_proposals(user_id=user_id)
     return jsonify({"proposals": props})
 
 
 @proposal_api_bp.route("/new", methods=["POST"])
+@require_auth
+@require_role("premium")
 def new_proposal():
     """Create a new proposal draft."""
     data = request.get_json(force=True, silent=True) or {}
-    user_id = data.get("user_id", "default_user")
+    user_id = current_uid() or data.get("user_id", "default_user")
     title = data.get("title", "Untitled Proposal")
     country = data.get("country", "")
     donor = data.get("donor", "OCHA_CBPF")
@@ -182,6 +191,7 @@ def new_proposal():
 
 
 @proposal_api_bp.route("/<proposal_id>", methods=["GET"])
+@require_auth
 def get_proposal_detail(proposal_id: str):
     """Retrieve full proposal record."""
     prop = get_proposal(proposal_id)
@@ -193,6 +203,8 @@ def get_proposal_detail(proposal_id: str):
 
 
 @proposal_api_bp.route("/<proposal_id>", methods=["PUT"])
+@require_auth
+@require_role("premium")
 def autosave_proposal(proposal_id: str):
     """Update fields of an active proposal.
 
@@ -200,7 +212,7 @@ def autosave_proposal(proposal_id: str):
     (Master Spec invariant #1). Identical-value writes pass silently.
     """
     data = request.get_json(force=True, silent=True) or {}
-    user_id = data.get("user_id", "default_user")
+    user_id = current_uid() or data.get("user_id", "default_user")
     try:
         updated = update_proposal(proposal_id, data, user_id=user_id)
     except ProposalLockedError as e:
@@ -211,9 +223,11 @@ def autosave_proposal(proposal_id: str):
 
 
 @proposal_api_bp.route("/<proposal_id>", methods=["DELETE"])
+@require_auth
+@require_role("premium")
 def remove_proposal(proposal_id: str):
     """Delete a proposal."""
-    user_id = request.args.get("user_id", "default_user")
+    user_id = current_uid() or request.args.get("user_id", "default_user")
     deleted = delete_proposal(proposal_id, user_id=user_id)
     if not deleted:
         return jsonify({"error": "Proposal not found"}), 404
@@ -221,6 +235,8 @@ def remove_proposal(proposal_id: str):
 
 
 @proposal_api_bp.route("/<proposal_id>/generate-context", methods=["POST"])
+@require_auth
+@require_role("premium")
 def handle_generate_context(proposal_id: str):
     """Draft Step 1 context fields with AI (manifest-aware + live evidence).
 
@@ -347,6 +363,8 @@ def handle_generate_context(proposal_id: str):
 
 
 @proposal_api_bp.route("/<proposal_id>/generate-toc", methods=["POST"])
+@require_auth
+@require_role("premium")
 def handle_generate_toc(proposal_id: str):
     """Trigger AI Theory of Change generation."""
     prop = get_proposal(proposal_id)
@@ -362,6 +380,8 @@ def handle_generate_toc(proposal_id: str):
 
 
 @proposal_api_bp.route("/<proposal_id>/generate-logframe", methods=["POST"])
+@require_auth
+@require_role("premium")
 def handle_generate_logframe(proposal_id: str):
     """Trigger AI 4x4 Logframe generation."""
     prop = get_proposal(proposal_id)
@@ -378,6 +398,8 @@ def handle_generate_logframe(proposal_id: str):
 
 
 @proposal_api_bp.route("/<proposal_id>/generate-narrative", methods=["POST"])
+@require_auth
+@require_role("premium")
 def handle_generate_narrative(proposal_id: str):
     """Trigger AI narrative drafting.
 
@@ -426,6 +448,8 @@ def handle_generate_narrative(proposal_id: str):
 
 
 @proposal_api_bp.route("/<proposal_id>/verify", methods=["POST"])
+@require_auth
+@require_role("premium")
 def handle_verify(proposal_id: str):
     """Trigger Blind Verifier audit."""
     prop = get_proposal(proposal_id)
@@ -446,6 +470,8 @@ def handle_verify(proposal_id: str):
 
 
 @proposal_api_bp.route("/<proposal_id>/references", methods=["POST"])
+@require_auth
+@require_role("premium")
 def add_references(proposal_id: str):
     """Append source entries to proposal.references[] (auto + manual).
 
@@ -487,6 +513,8 @@ def add_references(proposal_id: str):
 
 
 @proposal_api_bp.route("/<proposal_id>/advisor/chat", methods=["POST"])
+@require_auth
+@require_role("premium")
 def handle_advisor_chat(proposal_id: str):
     """Interactive Advisor chat session.
 
@@ -525,6 +553,7 @@ def handle_advisor_chat(proposal_id: str):
 
 
 @proposal_api_bp.route("/<proposal_id>/full-summary", methods=["GET"])
+@require_auth
 def get_full_summary(proposal_id: str):
     """Global aggregation endpoint (Master Spec STEP 5 directive #1).
 
@@ -564,6 +593,8 @@ def get_full_summary(proposal_id: str):
 
 
 @proposal_api_bp.route("/<proposal_id>/export/pdf", methods=["GET"])
+@require_auth
+@require_role("premium")
 def handle_export_pdf(proposal_id: str):
     """Compile and stream publication-grade Typst PDF.
 

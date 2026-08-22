@@ -31,6 +31,15 @@ VERIFIER_MODEL = os.getenv("VERIFIER_MODEL", "google/gemini-2.5-pro")
 # Secret key for Flask sessions
 SECRET_KEY = os.getenv("SECRET_KEY", "proposal-design-secret-key-2026")
 
+# ── Auth Configuration ────────────────────────────────────────────────────────
+# Shares Firebase project with Sightline (same domain, same user pool).
+FIREBASE_SERVICE_ACCOUNT_PATH = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "")
+DESKTOP_MODE = os.getenv("DESKTOP_MODE", "false").lower() in ("1", "true", "yes")
+DEV_AUTH_BYPASS = os.getenv("DEV_AUTH_BYPASS", "false").lower() in ("1", "true", "yes")
+SERVER_HOST = os.getenv("SERVER_HOST", "127.0.0.1")
+ADMIN_UIDS = os.getenv("ADMIN_UIDS", "")
+SERVER_API_KEY = os.getenv("SERVER_API_KEY", "")
+
 # ── Path prefix for reverse-proxy deployment ──────────────────────────────────
 # When served under /proposal via Caddy, set PROPOSAL_BASE_PATH=/proposal
 # Standalone (local dev): leave empty or omit.

@@ -1676,9 +1676,27 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
     });
   }
 
+  // ── Auth gate ──────────────────────────────────────────────────────────────────
+  // Check if user is authenticated. If not, show login overlay.
+  // Same domain as Sightline → shared localStorage → same Firebase ID token.
+  function checkAuth() {
+    const token = window.__idToken || localStorage.getItem('sightline_idToken');
+    const overlay = document.getElementById('auth-overlay');
+    if (!token) {
+      // Not authenticated — show login overlay
+      if (overlay) overlay.classList.remove('hidden');
+      return false;
+    }
+    // Authenticated — hide overlay if shown
+    if (overlay) overlay.classList.add('hidden');
+    return true;
+  }
+
   // ── Initialize App ────────────────────────────────────────────────────────
   async function init() {
     setupEventListeners();
+    // Auth gate: redirect to Sightline login if no token
+    if (!checkAuth()) return;
     await loadDonors();
     // Landing view first: existing proposals (view/delete) + New CTA
     await renderLanding();

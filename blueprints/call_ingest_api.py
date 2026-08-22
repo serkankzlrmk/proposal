@@ -26,6 +26,8 @@ from typing import Any, Dict
 
 from flask import Blueprint, jsonify, request
 
+from auth import current_uid, require_auth, require_role, optional_auth
+
 try:
     from config import DB_PATH
     from engine.call_ingest import (
@@ -195,6 +197,8 @@ def _generate_call_identity(corpus: str, extracted: Dict[str, Any]) -> Dict[str,
 
 
 @call_ingest_bp.route("/ingest", methods=["POST"])
+@require_auth
+@require_role("premium")
 def ingest_call():
     """Upload donor call documents (pdf/docx/md, MULTIPLE) -> review draft.
 
@@ -282,6 +286,7 @@ def ingest_call():
 
 
 @call_ingest_bp.route("/published", methods=["GET"])
+@optional_auth
 def list_published():
     """List published donor manifests (for the new-proposal picker)."""
     _init_table()
@@ -297,6 +302,7 @@ def list_published():
 
 
 @call_ingest_bp.route("/drafts", methods=["GET"])
+@require_auth
 def list_drafts():
     """List all call ingestion drafts (with documents + brief)."""
     _init_table()
@@ -320,6 +326,7 @@ def list_drafts():
 
 
 @call_ingest_bp.route("/drafts/<draft_id>", methods=["GET"])
+@require_auth
 def get_draft(draft_id: str):
     _init_table()
     conn = _conn()
@@ -340,6 +347,8 @@ def get_draft(draft_id: str):
 
 
 @call_ingest_bp.route("/drafts/<draft_id>", methods=["PUT"])
+@require_auth
+@require_role("premium")
 def update_draft(draft_id: str):
     """Human edits the manifest draft before publishing."""
     _init_table()
@@ -369,6 +378,8 @@ def update_draft(draft_id: str):
 
 
 @call_ingest_bp.route("/drafts/<draft_id>", methods=["DELETE"])
+@require_auth
+@require_role("premium")
 def delete_draft(draft_id: str):
     """Delete an unused call and its published manifest, if any.
 
@@ -423,6 +434,8 @@ def delete_draft(draft_id: str):
 
 
 @call_ingest_bp.route("/drafts/<draft_id>/publish", methods=["POST"])
+@require_auth
+@require_role("premium")
 def publish_draft(draft_id: str):
     """Human-approved publish: write donors/<call_id>.yaml, engine picks it up."""
     _init_table()
@@ -462,6 +475,8 @@ def publish_draft(draft_id: str):
 
 
 @call_ingest_bp.route("/drafts/<draft_id>/reject", methods=["POST"])
+@require_auth
+@require_role("premium")
 def reject_draft(draft_id: str):
     """Mark a draft rejected — no manifest published."""
     _init_table()

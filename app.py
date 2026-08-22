@@ -32,6 +32,8 @@ except ImportError:
     from proposal.blueprints.call_ingest_api import call_ingest_bp
     from proposal.db import init_db
 
+from auth import current_uid, current_role, require_auth
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -70,6 +72,22 @@ def index():
 def health():
     """Health check endpoint."""
     return {"status": "ok", "service": "proposal_pipeline", "version": "1.0.0"}
+
+
+@app.route("/api/auth/me")
+@require_auth
+def api_auth_me():
+    """Return current user info (same Firebase project as Sightline)."""
+    from flask import g
+
+    user = getattr(g, "current_user", None) or {}
+    return {
+        "uid": current_uid(),
+        "email": user.get("email", ""),
+        "name": user.get("name", ""),
+        "role": current_role(),
+        "is_admin": user.get("role") == "admin",
+    }
 
 
 # ── Reverse-proxy entry point (e.g. /proposal → /) ──────────────────────────

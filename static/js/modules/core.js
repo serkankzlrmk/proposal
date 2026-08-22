@@ -1,12 +1,31 @@
 /** Shared browser primitives. This module has no proposal-domain knowledge. */
 
+// ── Auth: Bearer token from Sightline's shared localStorage ──────────────────
+// Same domain (sightlinehumanitarian.com) → same localStorage.
+// Sightline's auth.js stores the Firebase ID token as window.__idToken.
+// Proposal reads it and injects into every API call as Authorization: Bearer.
+
+function _getIdToken() {
+  // 1. Direct — Sightline's auth.js sets window.__idToken after sign-in
+  if (window.__idToken) return window.__idToken;
+  // 2. localStorage — Sightline persists the token here
+  const stored = localStorage.getItem('sightline_idToken');
+  if (stored) return stored;
+  return '';
+}
+
 export async function api(url, options = {}) {
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-    ...options,
-  });
+  const token = _getIdToken();
+  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url, { ...options, headers });
 
   if (!res.ok) {
+    // Auth redirect: if 401, user needs to sign in via Sightline
+    if (res.status === 401) {
+      window.location.href = '/app';
+      throw new Error('Authentication required. Redirecting to sign-in…');
+    }
     const err = await res.json().catch(() => ({ error: res.statusText }));
     const error = new Error(err.error || `HTTP ${res.status}`);
     error.code = err.code || '';
