@@ -1724,15 +1724,23 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
         if (overlay) overlay.classList.add('hidden');
         return true;
       } else {
-        // Token expired or invalid — try refresh via Sightline
+        // Token expired or invalid — try refresh via Sightline's auth.js
         if (window.refreshIdToken) {
           try {
             const fresh = await window.refreshIdToken();
             if (fresh) {
               window.__idToken = fresh;
               localStorage.setItem('id_token', fresh);
-              if (overlay) overlay.classList.add('hidden');
-              return true;
+              // Retry with fresh token
+              const res2 = await fetch('/api/auth/me', {
+                headers: { 'Authorization': 'Bearer ' + fresh }
+              });
+              if (res2.ok) {
+                const user = await res2.json();
+                window.__currentUser = user;
+                if (overlay) overlay.classList.add('hidden');
+                return true;
+              }
             }
           } catch (e) { /* refresh failed */ }
         }
@@ -1741,9 +1749,13 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
         return false;
       }
     } catch (e) {
-      // Network error — allow through, overlay stays hidden
-      if (overlay) overlay.classList.add('hidden');
-      return true;
+      // Network error — if we have a token, allow through optimistically
+      if (token) {
+        if (overlay) overlay.classList.add('hidden');
+        return true;
+      }
+      if (overlay) overlay.classList.remove('hidden');
+      return false;
     }
   }
 

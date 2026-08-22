@@ -21,10 +21,11 @@ export async function api(url, options = {}) {
   const res = await fetch(url, { ...options, headers });
 
   if (!res.ok) {
-    // Auth redirect: if 401, user needs to sign in via Sightline
+    // Auth failure: show overlay instead of hard redirect
     if (res.status === 401) {
-      window.location.href = '/app';
-      throw new Error('Authentication required. Redirecting to sign-in…');
+      const overlay = document.getElementById('auth-overlay');
+      if (overlay) overlay.classList.remove('hidden');
+      throw new Error('Authentication required.');
     }
     const err = await res.json().catch(() => ({ error: res.statusText }));
     const error = new Error(err.error || `HTTP ${res.status}`);
