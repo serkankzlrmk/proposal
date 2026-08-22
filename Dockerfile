@@ -30,8 +30,5 @@ EXPOSE 5002
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -sf http://localhost:5002/health || exit 1
 
-# Run with gunicorn for production (fallback to Flask dev server if gunicorn missing)
-CMD ["python", "-c", "\
-import sys; \
-sys.path.insert(0, '.'); \
-try:\n    from app import app, HOST, PORT\n    app.run(host=HOST, port=PORT, debug=False, use_reloader=False)\nexcept ImportError:\n    from app import app\n    app.run(host='0.0.0.0', port=5002, debug=False, use_reloader=False)\n"]
+# Start the Flask app
+CMD ["python", "app.py"]
