@@ -714,6 +714,9 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
       if (toggleEl) toggleEl.addEventListener('change', () => loadProposals(toggleEl.checked));
     }
 
+    // Initial load
+    await loadProposals();
+
     async function loadProposals(showAll = false) {
       try {
         const url = showAll ? '/api/proposals?all=true' : '/api/proposals';
