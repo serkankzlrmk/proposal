@@ -53,6 +53,22 @@ proposal_api_bp = Blueprint("proposal_api", __name__, url_prefix="/api/proposals
 _evidence_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="proposal-evidence")
 
 
+def _check_owner(proposal_id: str):
+    """Ownership check: returns (prop, error_response).
+
+    Returns (prop_dict, None) if the current user owns the proposal or is admin.
+    Returns (None, error_json) if not found or not owner.
+    """
+    uid = current_uid()
+    role = current_role()
+    prop = get_proposal(proposal_id)
+    if not prop:
+        return None, ({"error": "Proposal not found"}, 404)
+    if prop.get("user_id") != uid and role != "admin":
+        return None, ({"error": "Not your proposal"}, 403)
+    return prop, None
+
+
 def _manifest_country(manifest) -> str:
     meta = getattr(manifest, "meta", None) or {}
     return str(meta.get("country") or "").strip()
@@ -129,9 +145,9 @@ def handle_analyze(proposal_id: str):
     Returns total_score + full trace (per NotebookLM spec):
     each criterion carries score/max_score/target_step/target_field/details.
     """
-    prop = get_proposal(proposal_id)
-    if not prop:
-        return jsonify({"error": "Proposal not found"}), 404
+    prop, err = _check_owner(proposal_id)
+    if err:
+        return jsonify(err[0]), err[1]
 
     engine = get_rule_engine()
     result = engine.score(resolve_donor_id(prop.get("donor", "OCHA_CBPF")), prop)
@@ -141,10 +157,15 @@ def handle_analyze(proposal_id: str):
 @proposal_api_bp.route("", methods=["GET"])
 @require_auth
 def get_proposals_list():
-    """List all proposals for the active user."""
-    user_id = current_uid() or request.args.get("user_id", "default_user")
-    props = list_proposals(user_id=user_id)
-    return jsonify({"proposals": props})
+    """List proposals for the active user (admin can see all with ?all=true)."""
+    uid = current_uid()
+    role = current_role()
+    # Admin can request all proposals with ?all=true
+    if role == "admin" and request.args.get("all", "").lower() == "true":
+        props = list_proposals(user_id=None)
+    else:
+        props = list_proposals(user_id=uid)
+    return jsonify({"proposals": props, "uid": uid, "role": role})
 
 
 @proposal_api_bp.route("/new", methods=["POST"])
@@ -153,7 +174,7 @@ def get_proposals_list():
 def new_proposal():
     """Create a new proposal draft."""
     data = request.get_json(force=True, silent=True) or {}
-    user_id = current_uid() or data.get("user_id", "default_user")
+    user_id = current_uid()
     title = data.get("title", "Untitled Proposal")
     country = data.get("country", "")
     donor = data.get("donor", "OCHA_CBPF")
@@ -194,9 +215,13 @@ def new_proposal():
 @require_auth
 def get_proposal_detail(proposal_id: str):
     """Retrieve full proposal record."""
+    uid = current_uid()
     prop = get_proposal(proposal_id)
     if not prop:
         return jsonify({"error": "Proposal not found"}), 404
+    # Ownership check: only owner or admin can view
+    if prop.get("user_id") != uid and current_role() != "admin":
+        return jsonify({"error": "Not your proposal"}), 403
     reviews = get_reviews(proposal_id)
     prop["reviews_history"] = reviews
     return jsonify({"proposal": prop})
@@ -211,8 +236,15 @@ def autosave_proposal(proposal_id: str):
     FSM guard: writing to a locked step's content returns 409 Conflict
     (Master Spec invariant #1). Identical-value writes pass silently.
     """
+    uid = current_uid()
+    prop = get_proposal(proposal_id)
+    if not prop:
+        return jsonify({"error": "Proposal not found"}), 404
+    if prop.get("user_id") != uid and current_role() != "admin":
+        return jsonify({"error": "Not your proposal"}), 403
+
     data = request.get_json(force=True, silent=True) or {}
-    user_id = current_uid() or data.get("user_id", "default_user")
+    user_id = uid
     try:
         updated = update_proposal(proposal_id, data, user_id=user_id)
     except ProposalLockedError as e:
@@ -227,8 +259,13 @@ def autosave_proposal(proposal_id: str):
 @require_role("premium")
 def remove_proposal(proposal_id: str):
     """Delete a proposal."""
-    user_id = current_uid() or request.args.get("user_id", "default_user")
-    deleted = delete_proposal(proposal_id, user_id=user_id)
+    uid = current_uid()
+    prop = get_proposal(proposal_id)
+    if not prop:
+        return jsonify({"error": "Proposal not found"}), 404
+    if prop.get("user_id") != uid and current_role() != "admin":
+        return jsonify({"error": "Not your proposal"}), 403
+    deleted = delete_proposal(proposal_id, user_id=uid)
     if not deleted:
         return jsonify({"error": "Proposal not found"}), 404
     return jsonify({"status": "deleted", "id": proposal_id})
@@ -244,9 +281,9 @@ def handle_generate_context(proposal_id: str):
     Sightline evidence (ReliefWeb/HDX) to draft humanitarian_situation,
     needs_assessment and beneficiary estimates. The user edits afterwards.
     """
-    prop = get_proposal(proposal_id)
-    if not prop:
-        return jsonify({"error": "Proposal not found"}), 404
+    prop, err = _check_owner(proposal_id)
+    if err:
+        return jsonify(err[0]), err[1]
 
     ctx = prop.get("context_data") or {}
     donor = prop.get("donor", "OCHA_CBPF")
@@ -367,9 +404,9 @@ def handle_generate_context(proposal_id: str):
 @require_role("premium")
 def handle_generate_toc(proposal_id: str):
     """Trigger AI Theory of Change generation."""
-    prop = get_proposal(proposal_id)
-    if not prop:
-        return jsonify({"error": "Proposal not found"}), 404
+    prop, err = _check_owner(proposal_id)
+    if err:
+        return jsonify(err[0]), err[1]
 
     ctx = prop.get("context_data") or {}
     donor = prop.get("donor", "OCHA_CBPF")
@@ -384,9 +421,9 @@ def handle_generate_toc(proposal_id: str):
 @require_role("premium")
 def handle_generate_logframe(proposal_id: str):
     """Trigger AI 4x4 Logframe generation."""
-    prop = get_proposal(proposal_id)
-    if not prop:
-        return jsonify({"error": "Proposal not found"}), 404
+    prop, err = _check_owner(proposal_id)
+    if err:
+        return jsonify(err[0]), err[1]
 
     ctx = prop.get("context_data") or {}
     toc = prop.get("toc_data") or {}
@@ -408,9 +445,9 @@ def handle_generate_narrative(proposal_id: str):
     so the LLM can cite [ref: SIGHTLINE_<SOURCE>] and the scoring engine
     grounds those citations (source_citations criterion).
     """
-    prop = get_proposal(proposal_id)
-    if not prop:
-        return jsonify({"error": "Proposal not found"}), 404
+    prop, err = _check_owner(proposal_id)
+    if err:
+        return jsonify(err[0]), err[1]
 
     ctx = prop.get("context_data") or {}
     logframe = prop.get("logframe_data") or {}
@@ -452,9 +489,9 @@ def handle_generate_narrative(proposal_id: str):
 @require_role("premium")
 def handle_verify(proposal_id: str):
     """Trigger Blind Verifier audit."""
-    prop = get_proposal(proposal_id)
-    if not prop:
-        return jsonify({"error": "Proposal not found"}), 404
+    prop, err = _check_owner(proposal_id)
+    if err:
+        return jsonify(err[0]), err[1]
 
     donor = prop.get("donor", "OCHA_CBPF")
     audit = run_blind_verifier(prop, donor=donor)
@@ -478,9 +515,9 @@ def add_references(proposal_id: str):
     Body: {"sources": [{"id": "HDX_SUDAN_2026", "title": "...", "url": "..."}, ...]}
     Deduplicates by source id. Returns the updated reference registry.
     """
-    prop = get_proposal(proposal_id)
-    if not prop:
-        return jsonify({"error": "Proposal not found"}), 404
+    prop, err = _check_owner(proposal_id)
+    if err:
+        return jsonify(err[0]), err[1]
 
     data = request.get_json(force=True, silent=True) or {}
     sources = data.get("sources") or []
@@ -523,9 +560,9 @@ def handle_advisor_chat(proposal_id: str):
     remediation prompts. The LLM returns a structured RemediationSuggestion
     (suggested_text + rationale) that the frontend can apply and re-score.
     """
-    prop = get_proposal(proposal_id)
-    if not prop:
-        return jsonify({"error": "Proposal not found"}), 404
+    prop, err = _check_owner(proposal_id)
+    if err:
+        return jsonify(err[0]), err[1]
 
     data = request.get_json(force=True, silent=True) or {}
     user_msg = data.get("message", "")
@@ -561,9 +598,9 @@ def get_full_summary(proposal_id: str):
     deterministic analysis + eligibility audit + locked steps. The UI's
     final review view renders entirely from this payload.
     """
-    prop = get_proposal(proposal_id)
-    if not prop:
-        return jsonify({"error": "Proposal not found"}), 404
+    prop, err = _check_owner(proposal_id)
+    if err:
+        return jsonify(err[0]), err[1]
 
     # Deterministic analysis (same engine as /analyze)
     analysis = get_rule_engine().score(resolve_donor_id(prop.get("donor", "OCHA_CBPF")), prop)
@@ -602,9 +639,9 @@ def handle_export_pdf(proposal_id: str):
     deterministic analysis flags AUTOMATIC_REJECTION, the PDF is refused
     with 403 so a desk-rejected proposal cannot be compiled.
     """
-    prop = get_proposal(proposal_id)
-    if not prop:
-        return jsonify({"error": "Proposal not found"}), 404
+    prop, err = _check_owner(proposal_id)
+    if err:
+        return jsonify(err[0]), err[1]
 
     # Final verification gate: hard eligibility check before compile
     analysis = get_rule_engine().score(resolve_donor_id(prop.get("donor", "OCHA_CBPF")), prop)

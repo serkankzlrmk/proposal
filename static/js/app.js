@@ -698,20 +698,39 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
     document.getElementById('workspace').style.display = 'none';
     document.getElementById('donorCallSection').style.display = 'none';
     const listEl = document.getElementById('landingProposalsList');
-    try {
-      const res = await api('/api/proposals');
-      const props = res.proposals || [];
-      if (!props.length) {
-        listEl.innerHTML = `
+
+    // ── Per-user header: show user name + admin toggle ────────────────────
+    const user = window.__currentUser || {};
+    const isAdmin = user.role === 'admin';
+    const userName = user.name || user.email || 'User';
+    const headerEl = document.getElementById('landingHeader');
+    if (headerEl) {
+      headerEl.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <span style="font-size:14px;color:var(--text-secondary);">Welcome back, <strong style="color:var(--text);">${esc(userName)}</strong></span>
+          ${isAdmin ? '<label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="showAllProposals" style="accent-color:var(--accent);width:14px;height:14px;"> Show all proposals</label>' : ''}
+        </div>`;
+      const toggleEl = document.getElementById('showAllProposals');
+      if (toggleEl) toggleEl.addEventListener('change', () => loadProposals(toggleEl.checked));
+    }
+
+    async function loadProposals(showAll = false) {
+      try {
+        const url = showAll ? '/api/proposals?all=true' : '/api/proposals';
+        const res = await api(url);
+        const props = res.proposals || [];
+        if (!props.length) {
+          listEl.innerHTML = `
           <div class="glass-card" style="text-align:center; padding:40px 20px;">
             <div style="font-size:15px; font-weight:600; color:var(--text); margin-bottom:6px;">No proposals yet</div>
             <div style="font-size:12.5px; color:var(--text-secondary); margin-bottom:16px;">Upload the donor call documents to extract the rules and start writing.</div>
             <button class="btn btn-primary" id="btnEmptyNew">+ New Proposal</button>
           </div>`;
-        document.getElementById('btnEmptyNew').addEventListener('click', createNewProposal);
-        return;
-      }
-      listEl.innerHTML = props.map(p => {
+          const btnEmpty = document.getElementById('btnEmptyNew');
+          if (btnEmpty) btnEmpty.addEventListener('click', createNewProposal);
+          return;
+        }
+        listEl.innerHTML = props.map(p => {
         const donor = esc(p.donor || '—');
         const step = Math.min(parseInt(p.step, 10) || 1, 5);
         const progress = Math.max(12, Math.round((step / 5) * 100));
