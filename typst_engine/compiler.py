@@ -50,6 +50,18 @@ def escape_typst(text: Any) -> str:
     return s
 
 
+def _normalized_key(value: Any) -> str:
+    return "".join(ch for ch in str(value or "").lower() if ch.isalnum())
+
+
+def _section_title(value: Any) -> str:
+    raw = str(value or "").replace("_", " ").strip()
+    title = raw if any(ch.isupper() for ch in raw) else raw.title()
+    for source, target in (("Ngo", "NGO"), ("Psea", "PSEA"), ("Cefm", "CEFM"), ("Mou", "MoU")):
+        title = title.replace(source, target)
+    return title
+
+
 def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str, Any]] = None) -> str:
     """Produce complete, valid Typst source code from a proposal dictionary.
 
@@ -60,7 +72,7 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
     """
     title = escape_typst(proposal.get("title") or "Humanitarian Emergency Response Proposal")
     country = escape_typst(proposal.get("country") or "Global")
-    donor = escape_typst(proposal.get("donor") or "OCHA_CBPF")
+    donor = escape_typst(proposal.get("donor_name") or _section_title(proposal.get("donor") or "OCHA_CBPF"))
     theme = escape_typst(proposal.get("theme") or "Multi-sector")
 
     review = proposal.get("review_data") or {}
@@ -110,10 +122,30 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
     needs = ctx.get("needs_assessment", "")
     hum_sit = ctx.get("humanitarian_situation", "")
     summary = ctx.get("summary", "")
+    beneficiary_data = ctx.get("beneficiaries") if isinstance(ctx.get("beneficiaries"), dict) else {}
+    beneficiary_total = int(
+        ctx.get("beneficiaries_total") or beneficiary_data.get("total") or 0
+    )
+    beneficiary_priority = int(
+        ctx.get("beneficiaries_displaced")
+        or beneficiary_data.get("idp_refugee")
+        or beneficiary_data.get("priority")
+        or 0
+    )
 
     narrative = proposal.get("narrative_data") or {}
     if not summary:
-        summary = narrative.get("project_summary", "") or narrative.get("executive_summary", "")
+        for key, text in narrative.items():
+            if _normalized_key(key) in {"projectsummary", "executivesummary", "proposaloverview"} and str(text).strip():
+                summary = text
+                break
+    summary_label = "APPROVED CALL-ALIGNED PROJECT SUMMARY" if summary else "PROJECT SUMMARY REQUIRES COMPLETION"
+    summary_text = summary or (
+        "No finalized project summary is available. Complete the call-aligned Narrative workspace before submission."
+    )
+    situation_text = hum_sit or needs or (
+        "No verified humanitarian situation or needs assessment is available. Complete the Context workspace before submission."
+    )
 
     justification = narrative.get("justification", "") or narrative.get("program_rationale", "")
 
@@ -127,10 +159,15 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
         "beneficiaries": "Beneficiary Targeting",
         "justification": "Intervention Justification",
     }
+    _skip_narrative_keys = {
+        "projectsummary", "executivesummary", "proposaloverview", "justification",
+        "humanitariansituation", "needsassessment", "beneficiaries",
+        "budgettemplate", "listofindicators",
+    }
     for _key, _text in (narrative or {}).items():
-        if _key in ("project_summary", "justification") or not _text or not str(_text).strip():
+        if _normalized_key(_key) in _skip_narrative_keys or not _text or not str(_text).strip():
             continue
-        _title = _section_titles.get(_key, str(_key).replace("_", " ").title())
+        _title = _section_titles.get(_key, _section_title(_key))
         narrative_sections_block += (
             f"== {escape_typst(_title)}\n\n"
             f"{escape_typst(str(_text))}\n\n"
@@ -138,41 +175,25 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
         )
 
     logframe = proposal.get("logframe_data") or {}
-    matrix = logframe.get("matrix") or [
-        {
-            "level": "Impact / Overall Goal",
-            "logic": f"Reduced excess morbidity and mortality for conflict-affected populations in {country}.",
-            "indicators": "Crude Mortality Rate < 0.5/10,000/day; GAM prevalence < 10%.",
-            "mov": "UN OCHA SMART Surveys, Ministry of Health Surveillance.",
-            "assumptions": "Humanitarian corridors remain operational and safe.",
-        },
-        {
-            "level": "Outcome 1",
-            "logic": f"Vulnerable households have sustained access to dignified emergency {theme} services.",
-            "indicators": ">= 85% of target population accessing standard emergency allocations per Sphere standards.",
-            "mov": "Post-Distribution Monitoring (PDM) reports, community feedback registries.",
-            "assumptions": "Catchment security allows daytime beneficiary movement.",
-        },
-        {
-            "level": "Output 1.1",
-            "logic": "Critical community facilities rehabilitated, solarized, and handed over.",
-            "indicators": "12 operational service stations; 24 committee members trained with SADD disaggregation.",
-            "mov": "Handover completion certificates, training rosters.",
-            "assumptions": "Technical procurement clearances received on schedule.",
-        },
-        {
-            "level": "Activities",
-            "logic": "Act 1.1.1: Rapid needs assessment. \\ Act 1.1.2: Procurement and installations. \\ Act 1.1.3: Community mobilization.",
-            "indicators": "Milestone delivery >= 95% on-schedule.",
-            "mov": "Weekly field logs, geo-tagged photographic proof.",
-            "assumptions": "Local elder cooperation and peaceful coexistence.",
-        },
-    ]
+    toc = proposal.get("toc_data") or {}
+    toc_narrative = (
+        logframe.get("theory_of_change_narrative")
+        or toc.get("theory_of_change_narrative")
+        or toc.get("narrative")
+        or "The results chain links planned activities to measurable outputs, outcomes and the proposal impact."
+    )
+    toc_assumptions = logframe.get("assumptions") or toc.get("assumptions") or []
+    assumptions_text = " • ".join(str(item) for item in toc_assumptions if str(item).strip())
+    # Never invent a sector-specific logframe when an uploaded call has not
+    # produced one yet. An explicit warning is safer than plausible-looking
+    # WASH/health content leaking into a proposal for a different topic.
+    matrix = logframe.get("matrix") or []
 
     # ── Step 4 data: itemized budget + 5x5 risk matrix (render when present) ──
     budget = proposal.get("budget_data") or {}
     budget_items = budget.get("items") or []
     risks = budget.get("risks") or []
+    currency = escape_typst(budget.get("currency") or "USD")
 
     budget_section = ""
     if budget_items:
@@ -180,14 +201,23 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
         for it in budget_items:
             if not isinstance(it, dict):
                 continue
-            cat = escape_typst(it.get("category", ""))
+            cat = escape_typst(_section_title(it.get("category", "")))
             desc = escape_typst(it.get("description", ""))
-            ut = escape_typst(it.get("unit_type", ""))
             uc = float(it.get("unit_cost", 0) or 0)
             cnt = float(it.get("unit_count", 0) or 0)
             total = round(cnt * uc, 2)
-            budget_rows += f"  [{cat}], [{desc}], [{ut}], [{uc:,.0f}], [{total:,.0f}],\n"
-        overhead = budget.get("overhead_percent", 0.0)
+            qty_unit = escape_typst(f"{cnt:g} {it.get('unit_type', '')}".strip())
+            budget_rows += f"  [{cat}], [{desc}], [{qty_unit}], [{uc:,.2f}], [{total:,.2f}],\n"
+        direct_total = sum(
+            float(it.get("unit_count", 0) or 0) * float(it.get("unit_cost", 0) or 0)
+            for it in budget_items if isinstance(it, dict) and it.get("category") != "indirect_overhead"
+        )
+        indirect_total = sum(
+            float(it.get("unit_count", 0) or 0) * float(it.get("unit_cost", 0) or 0)
+            for it in budget_items if isinstance(it, dict) and it.get("category") == "indirect_overhead"
+        )
+        grand_total = direct_total + indirect_total
+        overhead = round(indirect_total / direct_total * 100.0, 2) if direct_total else 0.0
         cap = budget.get("overhead_cap_percent", 7.0)
         cap_note = "within cap" if overhead <= cap else "EXCEEDS CAP: score penalty applied"
         budget_section = f"""
@@ -198,28 +228,23 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
   fill: (col, row) => if row == 0 {{ rgb("f1f5f9") }} else {{ none }},
   stroke: 0.5pt + rgb("e2e8f0"),
   align: (col, row) => if col in (2, 3, 4) {{ right }} else {{ left }},
-  table.header([*Category*], [*Description*], [*Unit*], [*Unit Cost (USD)*], [*Total (USD)*]),
-{budget_rows})
+  table.header(
+    text(size: 7.5pt, weight: "bold")[Category],
+    text(size: 7.5pt, weight: "bold")[Description],
+    text(size: 7.5pt, weight: "bold")[Qty / Unit],
+    text(size: 7.5pt, weight: "bold")[Unit Cost ({currency})],
+    text(size: 7.5pt, weight: "bold")[Total ({currency})]
+  ),
+{budget_rows}  [*TOTAL*], [*Final consolidated proposal budget*], [], [], [*{grand_total:,.2f} {currency}*],
+)
 #text(8pt, fill: rgb("64748b"))[_Overhead: {overhead:.1f}% (donor cap {cap:.1f}%) — {cap_note}._]
 """
     else:
-        budget_section = """= 5. Activity Budget & Cost-Effectiveness
+        budget_section = """= 5. Itemized Budget & Cost-Effectiveness
 
-#table(
-  columns: (1.5fr, 3fr, 1.2fr, 1.2fr, 1.5fr),
-  fill: (col, row) => if row == 0 { rgb("f1f5f9") } else { none },
-  stroke: 0.5pt + rgb("e2e8f0"),
-  align: (col, row) => if col in (2, 3, 4) { right } else { left },
-  table.header([*Category*], [*Budget Line Description*], [*Qty / Unit*], [*Unit Cost (USD)*], [*Total (USD)*]),
-  [Direct Program], [Critical rehabilitation and emergency supplies], [12 units], [4,500], [54,000],
-  [Direct Program], [Quality testing, monitoring kits, treatment supplies], [6 months], [2,000], [12,000],
-  [Direct Program], [Community outreach and training campaigns], [24 sessions], [350], [8,400],
-  [Personnel], [Field Technical Officers & Engineers], [6 months], [4,200], [25,200],
-  [Operational], [Monitoring, logistics, security protocol], [Lump sum], [9,500], [9,500],
-  [*TOTAL BUDGET*], [*Overall Direct & Indirect Project Cost*], [], [], [*USD 109,100*]
-)
-
-#text(8pt, fill: rgb("64748b"))[_Cost-Effectiveness Ratio: USD 5.45 per beneficiary reached. In accordance with EU PRAG and USAID BHA cost reasonableness rubrics._]
+#block(fill: rgb("fff7ed"), inset: 9pt, radius: 4pt, stroke: 0.5pt + rgb("fdba74"))[
+  No finalized budget lines are available. Complete the Budget workspace before submission.
+]
 """
 
     risk_section = ""
@@ -228,7 +253,7 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
         for r in risks:
             if not isinstance(r, dict):
                 continue
-            cat = escape_typst(r.get("category", ""))
+            cat = escape_typst(_section_title(r.get("category", "")))
             desc = escape_typst(r.get("description", ""))
             lk = int(r.get("likelihood", 1) or 1)
             im = int(r.get("impact", 1) or 1)
@@ -245,20 +270,64 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
 == 5x5 Risk Assessment Matrix
 
 #table(
-  columns: (1.3fr, 2.2fr, 0.8fr, 0.8fr, 0.9fr, 2.4fr),
+  columns: (1.6fr, 2.1fr, 0.75fr, 0.75fr, 0.8fr, 2.4fr),
   fill: (col, row) => if row == 0 {{ rgb("0f172a") }} else {{ none }},
   stroke: 0.5pt + rgb("cbd5e1"),
   align: top + left,
   table.header(
     text(fill: white, weight: "bold")[Category],
     text(fill: white, weight: "bold")[Risk Description],
-    text(fill: white, weight: "bold")[Likelihood],
-    text(fill: white, weight: "bold")[Impact],
+    text(fill: white, size: 7.5pt, weight: "bold")[L (1–5)],
+    text(fill: white, size: 7.5pt, weight: "bold")[I (1–5)],
     text(fill: white, weight: "bold")[Severity],
     text(fill: white, weight: "bold")[Mitigation Strategy]
   ),
 {risk_rows})
-#text(8pt, fill: rgb("64748b"))[_Severity = Likelihood × Impact (1-25). Red ≥ 15, Amber 8-12, Green 1-6. Risks with severity ≥ 12 require a mandatory mitigation plan._]
+#text(8pt, fill: rgb("64748b"))[_Severity = Likelihood × Impact (1-25). Red ≥ 15, Amber 8-14, Green 1-7. Risks with severity ≥ 12 require a mandatory mitigation plan._]
+"""
+
+    if beneficiary_total:
+        priority_total = min(beneficiary_priority, beneficiary_total)
+        other_total = max(0, beneficiary_total - priority_total)
+        priority_share = (priority_total / beneficiary_total * 100.0) if beneficiary_total else 0.0
+        beneficiary_section = f"""
+= 2. Target Population
+
+#table(
+  columns: (2.5fr, 1fr, 1fr),
+  fill: (col, row) => if row == 0 {{ rgb("f1f5f9") }} else {{ none }},
+  stroke: 0.5pt + rgb("e2e8f0"),
+  align: (col, row) => if col == 0 {{ left }} else {{ right }},
+  table.header([*Target Group*], [*People*], [*Share*]),
+  [Priority / displaced beneficiaries], [{priority_total:,}], [{priority_share:.1f}%],
+  [Other targeted participants], [{other_total:,}], [{100.0 - priority_share:.1f}%],
+  [*Total direct beneficiaries*], [*{beneficiary_total:,}*], [*100%*]
+)
+
+#text(8pt, fill: rgb("64748b"))[_Figures are taken from the saved proposal context. Apply SADD only where person-level source data is available._]
+"""
+    else:
+        beneficiary_section = """= 2. Target Population
+
+#block(fill: rgb("fff7ed"), inset: 9pt, radius: 4pt, stroke: 0.5pt + rgb("fdba74"))[
+  No finalized beneficiary totals are available. Confirm targets and disaggregation before submission.
+]
+"""
+
+    toc_section = f"""
+= 3. Theory of Change
+
+#block(
+  fill: rgb("f8fafc"),
+  inset: 10pt,
+  radius: 4pt,
+  stroke: (left: 3pt + rgb("7c3aed"), rest: 0.5pt + rgb("e2e8f0")),
+  width: 100%,
+  [{escape_typst(toc_narrative)}]
+)
+
+== Critical Assumptions
+{escape_typst(assumptions_text or "Assumptions are documented in the logical framework and risk register.")}
 """
 
     doc = f"""
@@ -267,7 +336,7 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
   margin: (x: 1.8cm, top: 2.2cm, bottom: 2.2cm),
   header: [
     #grid(
-      columns: (1fr, auto),
+      columns: (1fr, 70pt),
       align(left)[#text(8pt, fill: rgb("6b7280"), weight: "bold")[""" + title.upper() + """ — """ + donor.upper() + """]],
       align(right)[#text(8pt, fill: rgb("6b7280"))[""" + country + """ | GMS Proposal]]
     )
@@ -279,7 +348,7 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
     #grid(
       columns: (1fr, auto),
       align(left)[#text(8pt, fill: rgb("9ca3af"))[Sightline GMS • Autonomous Proposal Engine • Confidential]],
-      align(right)[#text(8pt, fill: rgb("4b5563"), weight: "bold")[Page 1 (Verified)]]
+      align(right)[#text(8pt, fill: rgb("4b5563"), weight: "bold")[Page #context counter(page).display("1 / 1", both: true)]]
     )
   ]
 )
@@ -291,7 +360,7 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
   spacing: 120%,
   lang: "en"
 )
-#set par(justify: true, leading: 0.6em)
+#set par(justify: false, leading: 0.6em)
 
 // ── Header Cover Banner ──────────────────────────────────────────────────────
 #block(
@@ -340,59 +409,25 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
   stroke: (left: 3pt + rgb("0284c7"), rest: 0.5pt + rgb("e2e8f0")),
   width: 100%,
   [
-    #text(8pt, weight: "bold", fill: rgb("0369a1"))[PROJECT SUMMARY (OCHA GPPi 8+3 / USAID EAG COMPLIANT)]\\
+    #text(8pt, weight: "bold", fill: rgb("0369a1"))[""" + escape_typst(summary_label) + """]\\
     #v(2pt)
-    """ + escape_typst(summary or "Emergency multi-sectoral humanitarian intervention designed to deliver life-saving assistance adhering to Sphere Minimum Standards.") + """
+    """ + escape_typst(summary_text) + """
   ]
 )
 
 #v(4pt)
 == Humanitarian Situation & Needs Assessment
-""" + escape_typst(hum_sit or needs or f"Comprehensive assessment conducted in {country} targeting acute vulnerability and protection risks.") + """
+""" + escape_typst(situation_text) + """
 
 """ + narrative_sections_block + """
 
 #v(8pt)
 
-= 2. Target Beneficiary Analysis
-
-#table(
-  columns: (1.5fr, 1fr, 1fr, 1fr),
-  fill: (col, row) => if row == 0 { rgb("f1f5f9") } else { none },
-  stroke: (col, row) => if row == 0 { (bottom: 1pt + rgb("cbd5e1")) } else { 0.5pt + rgb("e2e8f0") },
-  align: (col, row) => if col == 0 { left } else { center },
-  table.header([*Target Group*], [*Female*], [*Male*], [*Total*]),
-  [Internally Displaced Persons (IDP)], [5,400], [4,600], [*10,000*],
-  [Refugees & Returnees], [2,800], [2,200], [*5,000*],
-  [Vulnerable Host Community], [2,500], [2,500], [*5,000*],
-  [*Total Direct Beneficiaries*], [*10,700 (53.5%)*], [*9,300 (46.5%)*], [*20,000*]
-)
-
-#text(8pt, fill: rgb("64748b"))[_Note: Fully disaggregated by SADD. Over 50% target population is IDP/Refugee adhering to USAID/BHA quota criteria._]
+""" + beneficiary_section + """
 
 #v(8pt)
 
-= 3. Theory of Change (ToC)
-
-#block(
-  fill: rgb("f8fafc"),
-  inset: 9pt,
-  radius: 4pt,
-  stroke: 0.5pt + rgb("cbd5e1"),
-  width: 100%,
-  [
-    #grid(
-      columns: (1fr, auto, 1fr, auto, 1fr),
-      align: center + horizon,
-      gutter: 6pt,
-      block(fill: rgb("e0f2fe"), inset: 6pt, radius: 3pt)[#text(8pt, weight: "bold", fill: rgb("0369a1"))[ACTIVITIES / INPUTS]\\ #text(7.5pt)[Immediate Assistance & Rehabilitation]],
-      text(12pt, fill: rgb("0284c7"))[->],
-      block(fill: rgb("ede9fe"), inset: 6pt, radius: 3pt)[#text(8pt, weight: "bold", fill: rgb("6d28d9"))[OUTPUTS]\\ #text(7.5pt)[Enhanced Access & Capacity Built]],
-      text(12pt, fill: rgb("0284c7"))[->],
-      block(fill: rgb("dcfce7"), inset: 6pt, radius: 3pt)[#text(8pt, weight: "bold", fill: rgb("15803d"))[OUTCOMES & IMPACT]\\ #text(7.5pt)[Sustainable Resilience & Reduced Vulnerability]]
-    )
-  ]
-)
+""" + toc_section + """
 
 #v(8pt)
 
@@ -404,11 +439,11 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
   stroke: 0.5pt + rgb("cbd5e1"),
   align: top + left,
   table.header(
-    [*Results Level*],
-    [*Intervention Logic*],
-    [*Indicators (OVI)*],
-    [*Sources (MoV)*],
-    [*Assumptions & Risks*]
+    text(fill: white, size: 8pt, weight: "bold")[Results Level],
+    text(fill: white, size: 8pt, weight: "bold")[Intervention Logic],
+    text(fill: white, size: 8pt, weight: "bold")[Indicators (OVI)],
+    text(fill: white, size: 8pt, weight: "bold")[Sources (MoV)],
+    text(fill: white, size: 8pt, weight: "bold")[Assumptions & Risks]
   ),
 """
 
@@ -422,6 +457,15 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
 
     doc += """
 )
+
+"""
+    if not matrix:
+        doc += """#block(fill: rgb("fff7ed"), inset: 9pt, radius: 4pt, stroke: 0.5pt + rgb("fdba74"))[
+  No finalized logframe matrix is available. Complete the Logframe workspace before submission.
+]
+"""
+
+    doc += """
 
 #v(8pt)
 

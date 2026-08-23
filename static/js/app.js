@@ -396,13 +396,57 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
     { key: 'justification', title: 'Intervention Justification', max_chars: 3000, description: 'Why this intervention, why now.' },
   ];
 
+  function normalizeNarrativeKey(value) {
+    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+  }
+
+  function narrativeTitle(value) {
+    return String(value || '')
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, ch => ch.toUpperCase())
+      .replace(/\bngo\b/gi, 'NGO')
+      .replace(/\bpsea\b/gi, 'PSEA')
+      .replace(/\bcefm\b/gi, 'CEFM');
+  }
+
+  function resolveNarrativeSections(profile, narrative) {
+    const configured = profile?.sections?.length ? profile.sections : [];
+    const actualKeys = Object.keys(narrative || {});
+    const used = new Set();
+    const sections = configured.map(sec => {
+      const configuredKey = normalizeNarrativeKey(sec.key);
+      const actualKey = actualKeys.find(key => !used.has(key) && normalizeNarrativeKey(key) === configuredKey) || sec.key;
+      used.add(actualKey);
+      return {
+        ...sec,
+        key: actualKey,
+        title: sec.title || narrativeTitle(actualKey),
+        max_chars: Number(sec.max_chars) || 3000,
+        description: sec.description || 'Complete this donor-required narrative section.',
+      };
+    });
+
+    actualKeys.forEach(key => {
+      if (used.has(key)) return;
+      sections.push({
+        key,
+        title: narrativeTitle(key),
+        max_chars: Math.max(3000, String(narrative[key] || '').length),
+        description: 'Generated from the approved donor call. Review and refine before submission.',
+      });
+      used.add(key);
+    });
+
+    return sections.length ? sections : FALLBACK_SECTIONS;
+  }
+
   function renderNarrative() {
     const donorKey = state.proposal?.donor || 'OCHA_CBPF';
     const profile = state.donors[donorKey] || { sections: [] };
     const narrative = state.proposal?.narrative_data || {};
-    const sections = (profile.sections && profile.sections.length ? profile.sections : FALLBACK_SECTIONS);
+    const sections = resolveNarrativeSections(profile, narrative);
 
-    if (!state.activeNarrativeTab && sections.length > 0) {
+    if (!sections.some(sec => sec.key === state.activeNarrativeTab) && sections.length > 0) {
       state.activeNarrativeTab = sections[0].key;
     }
 
@@ -412,9 +456,10 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
       const active = sec.key === state.activeNarrativeTab ? 'active' : '';
       const text = narrative[sec.key] || '';
       const isOver = text.length > sec.max_chars;
+      const completed = Boolean(text.trim());
       tabsHtml += `
-        <button class="step-btn ${active}" data-tab="${sec.key}" style="padding:6px 12px; font-size:12px;">
-          ${esc(sec.title)} ${isOver ? '(OVER LIMIT)' : ''}
+        <button class="step-btn ${active}" data-tab="${esc(sec.key)}" style="padding:6px 12px; font-size:12px;">
+          ${completed ? '✓ ' : ''}${esc(sec.title)} ${isOver ? '(OVER LIMIT)' : ''}
         </button>
       `;
     });

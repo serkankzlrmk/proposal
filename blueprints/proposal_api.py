@@ -124,8 +124,34 @@ def _deterministic_context_draft(prop, ctx, manifest=None):
 @proposal_api_bp.route("/donors", methods=["GET"])
 @optional_auth
 def get_donors():
-    """List available donor profiles and section constraints."""
-    return jsonify({"donors": DONOR_PROFILES})
+    """List legacy profiles plus every dynamically published donor manifest."""
+    profiles = {key: dict(value) for key, value in DONOR_PROFILES.items()}
+    loader = YamlDonorRuleLoader()
+    for donor_id in loader.list_donors():
+        try:
+            manifest = loader.load(donor_id)
+        except Exception as exc:
+            logger.warning("Skipping invalid donor profile %s: %s", donor_id, exc)
+            continue
+        sections = []
+        for key in manifest.mandatory_sections:
+            title = str(key).replace("_", " ").strip()
+            sections.append({
+                "key": key,
+                "title": title,
+                "max_chars": int((manifest.max_char_limits or {}).get(key, 3000)),
+                "required": True,
+                "description": f"Required by the approved {manifest.display_name} call manifest.",
+            })
+        profiles[donor_id] = {
+            "name": manifest.display_name,
+            "sections": sections,
+            "mandatory_keywords": manifest.mandatory_keywords,
+            "currency": manifest.currency,
+            "budget_max": manifest.budget_max,
+            "overhead_cap_percent": manifest.overhead_cap_percent,
+        }
+    return jsonify({"donors": profiles})
 
 
 @proposal_api_bp.route("/donors/yaml", methods=["GET"])
@@ -649,8 +675,19 @@ def handle_export_pdf(proposal_id: str):
             "failed_quotas": elig.get("failed_quotas", []),
         }), 403
 
+    # Enrich the export with the human donor name while preserving the stored
+    # donor id used by scoring. This keeps future uploaded calls readable in
+    # the publication without coupling the compiler to manifest storage.
+    prop_for_pdf = dict(prop)
+    try:
+        loader = YamlDonorRuleLoader()
+        manifest = loader.load(resolve_donor_id(prop.get("donor", "OCHA_CBPF"), loader))
+        prop_for_pdf["donor_name"] = manifest.display_name
+    except Exception as exc:
+        logger.warning("Could not resolve donor display name for PDF: %s", exc)
+
     # Pass the real deterministic score into the PDF (badge + audit bullets)
-    pdf_bytes = compile_pdf(prop, analysis=analysis)
+    pdf_bytes = compile_pdf(prop_for_pdf, analysis=analysis)
     if not pdf_bytes:
         return jsonify({"error": "PDF compilation failed"}), 500
 
