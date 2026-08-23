@@ -184,6 +184,13 @@ def test_harden_indicator_text_completes_dimensions():
     strong = ">= 85% households access 15L/person/day by month 12, disaggregated by gender and age"
     assert harden_indicator_text(strong) == strong
 
+    # Institutional/object indicators must not receive population targets or SADD.
+    pathway = harden_indicator_text("3 referral pathways established by month 6")
+    assert "target population" not in pathway
+    assert "disaggregated by" not in pathway
+    assert "measurable" in smart_validation_result(pathway)["passed"]
+    assert "disaggregation" in smart_validation_result(pathway)["passed"]
+
 
 # ── API endpoints ────────────────────────────────────────────────────────
 def test_step3_analyze_endpoint(client):

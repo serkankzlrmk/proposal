@@ -25,7 +25,8 @@ from engine.models import LogframeIndicator
 
 # ── Shared SMART patterns (canonical; mirrors engine/yaml_rules.SMART_PATTERNS) ──
 PATTERN_MEASURABLE = re.compile(
-    r"\d+(\.\d+)?\s*%|\d+\s*(L|kg|m|people|households|children|women|men|girls|boys|schools|facilities|units|persons|individuals)\b",
+    r"\d+(\.\d+)?\s*%|\d+\s*(?:(?:documented|institutional|referral|training)\s+){0,2}"
+    r"(L|kg|m|people|households|children|women|men|girls|boys|schools|facilities|units|persons|individuals|staff|actors|participants|sessions?|trainings?|manuals?|pathways?|referrals?|cases?|policies|systems?|institutions?|centres?|centers?|results?)\b",
     re.I,
 )
 PATTERN_NUMBER = re.compile(r"\d+(\.\d+)?")
@@ -41,10 +42,15 @@ PATTERN_DISAGG = re.compile(
     r"\b(gender|sex|age|sadd|disaggregated|disaggregation|female|male)\b",
     re.I,
 )
+PATTERN_NON_PERSON_INDICATOR = re.compile(
+    r"\b(manuals?|pathways?|policies|systems?|facilities|sessions?|trainings?|"
+    r"referrals?|protocols?|mechanisms?|materials?|reports?|meetings?|institutions?)\b",
+    re.I,
+)
 PATTERN_SPECIFIC = re.compile(r".{15,}", re.S)
 PATTERN_ACHIEVABLE = re.compile(r"\d{1,3}\s*%|\d+\s*of\s*\d+|\b(target|expected|baseline)\b", re.I)
 PATTERN_RELEVANT = re.compile(
-    r"\b(reduce|increase|improve|access|ensure|strengthen|maintain|restore)\b", re.I
+    r"\b(reduce|increase|improve|access|ensure|strengthen|maintain|restore|align(?:ed|ment)?)\b", re.I
 )
 
 DIMENSION_PATTERNS = {
@@ -124,6 +130,10 @@ def smart_validation_result(indicator_text: str) -> Dict[str, Any]:
     """
     text = (indicator_text or "").strip()
     passed = [dim for dim, pat in DIMENSION_PATTERNS.items() if pat.search(text)]
+    # SADD is not applicable to counts of objects, systems or institutional
+    # deliverables. Treat it as satisfied/N/A instead of appending nonsense.
+    if "disaggregation" not in passed and PATTERN_NON_PERSON_INDICATOR.search(text):
+        passed.append("disaggregation")
     failed = [dim for dim in DIMENSION_PATTERNS if dim not in passed]
     return {
         "passed": passed,
@@ -165,7 +175,7 @@ def validate_indicators(entries: List[str]) -> Dict[str, Any]:
 HARDENING_SUFFIXES = {
     "time_bound": "by month 12",
     "disaggregation": "disaggregated by gender and age",
-    "measurable": "targeting at least 50% of the target population",
+    "measurable": "targeting at least 1 documented result",
     "achievable": "against a documented baseline",
     "relevant": "aligned with donor priorities",
 }

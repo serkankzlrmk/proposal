@@ -259,6 +259,15 @@ STRUCTURE RULES (MANDATORY):
 - EACH output MUST contain 2-5 activities.
 - If you cannot fill a level with meaningful content, use realistic,
   sector-standard phrasing for {theme} — never leave outcomes/outputs empty.
+- Every indicator target MUST match its unit: people use people/percent,
+  pathways/manuals/systems use an absolute count, never "% of population".
+- Apply SADD only to person-level indicators, never to objects or systems.
+- Output indicators measure delivered goods/services (sessions completed,
+  people reached, mechanisms established), not changes in well-being.
+- Outcome/impact indicators must be achievable and attributable within the
+  project duration; do not use reductions in reporting as a success measure.
+- Means of verification for case management or psychosocial data MUST state
+  anonymization, confidentiality and informed-consent safeguards.
 
 DONOR REQUIREMENTS (from the call manifest — indicators must satisfy these):
     {donor_reqs}

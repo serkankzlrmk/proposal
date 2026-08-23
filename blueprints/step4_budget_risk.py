@@ -301,6 +301,8 @@ def generate_risk():
     country = ctx.get("country") or prop.get("country") or "Target Country"
     theme = ctx.get("theme") or prop.get("theme") or "Multi-sector"
     donor = _resolve_donor(prop)
+    logframe_context = json.dumps(prop.get("logframe_data") or {}, ensure_ascii=False)[:8000]
+    narrative_context = json.dumps(prop.get("narrative_data") or {}, ensure_ascii=False)[:8000]
 
     prompt = f"""
 Draft a 5x5 risk matrix for a humanitarian proposal in {country} ({theme}) for donor {donor}.
@@ -379,9 +381,16 @@ def generate_budget():
     prompt = f"""
 Draft an itemized budget for a humanitarian proposal in {country} ({theme}) for donor {donor}.
 Budget currency: {currency}. Budget ceiling: {budget_max or 'not specified'} {currency} max — MUST NOT exceed.
+PROJECT LOGFRAME (budget lines must map directly to these activities/outputs):
+{logframe_context}
+PROJECT NARRATIVE (do not introduce sectors or commodities absent here):
+{narrative_context}
 Return ONLY JSON: a list of 8-12 budget line items.
 Each object: {{"category": "personnel|travel_transport|equipment_supplies|contractual|direct_operational|indirect_overhead", "description": "...", "unit_type": "...", "unit_count": number, "unit_cost": number}}
 Indirect overhead must stay at or below {overhead_cap_percent}% of direct costs.
+Every non-overhead line MUST directly support a named activity or output above.
+Do not add generic kits, winterization, WASH, shelter, food or other commodities
+unless they explicitly appear in the project logframe or narrative.
 LANGUAGE POLICY: ALWAYS respond in English.
 """
     raw = _call_llm(prompt, temperature=0.3)
