@@ -13,9 +13,11 @@
 
 (function () {
   const CONFIG = window.FIREBASE_CONFIG;
+  window.__firebaseAuthReady = false;
 
   if (!CONFIG) {
     console.warn('proposal-auth: FIREBASE_CONFIG missing — auth disabled');
+    window.proposalAuthReady = Promise.resolve(false);
     return;
   }
 
@@ -44,28 +46,6 @@
       return;
     }
     const auth = window.firebase.auth();
-
-    // ── Token persistence (shared key with Sightline) ─────────────────────
-    auth.onAuthStateChanged(async (user) => {
-      if (user) {
-        try {
-          const tok = await user.getIdToken(true);
-          localStorage.setItem('id_token', tok);
-          window.__idToken = tok;
-          window.__currentUser = {
-            uid: user.uid,
-            email: user.email,
-            name: user.displayName || '',
-          };
-        } catch (e) {
-          console.warn('proposal-auth: token refresh failed', e);
-        }
-      } else {
-        localStorage.removeItem('id_token');
-        window.__idToken = '';
-      }
-      window.dispatchEvent(new Event('auth-state-changed'));
-    });
 
     // ── API surface used by app.js ────────────────────────────────────────
     window.getIdToken = function () {
@@ -105,8 +85,46 @@
       return tok;
     };
 
+    // Resolve only after Firebase has restored (or rejected) the persisted
+    // user. app.js awaits this promise before deciding whether to show login.
+    await new Promise((resolve) => {
+      let initialStateHandled = false;
+      auth.onAuthStateChanged(async (user) => {
+        if (user) {
+          try {
+            const tok = await user.getIdToken(true);
+            localStorage.setItem('id_token', tok);
+            window.__idToken = tok;
+            window.__currentUser = {
+              uid: user.uid,
+              email: user.email,
+              name: user.displayName || '',
+            };
+          } catch (e) {
+            console.warn('proposal-auth: token refresh failed', e);
+          }
+        } else {
+          localStorage.removeItem('id_token');
+          window.__idToken = '';
+          window.__currentUser = null;
+        }
+        window.dispatchEvent(new Event('auth-state-changed'));
+        if (!initialStateHandled) {
+          initialStateHandled = true;
+          resolve(Boolean(user));
+        }
+      }, (error) => {
+        console.error('proposal-auth: auth state restore failed', error);
+        if (!initialStateHandled) {
+          initialStateHandled = true;
+          resolve(false);
+        }
+      });
+    });
+
     window.__firebaseAuthReady = true;
+    return Boolean(auth.currentUser);
   }
 
-  init();
+  window.proposalAuthReady = init();
 })();

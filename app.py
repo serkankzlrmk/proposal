@@ -44,6 +44,19 @@ logger = logging.getLogger("proposal_app")
 # Standalone → /static   |   Reverse-proxy → /proposal/static
 _static_url = f"{PROPOSAL_BASE_PATH}/static" if PROPOSAL_BASE_PATH else "/static"
 
+
+def _template_config():
+    asset_paths = (
+        BASE_DIR / "static" / "js" / "app.js",
+        BASE_DIR / "static" / "js" / "proposal-auth.js",
+        BASE_DIR / "static" / "css" / "proposal.css",
+    )
+    asset_version = format(
+        max((path.stat().st_mtime_ns for path in asset_paths if path.exists()), default=0),
+        "x",
+    )
+    return {"PROPOSAL_BASE_PATH": PROPOSAL_BASE_PATH, "ASSET_VERSION": asset_version}
+
 app = Flask(
     __name__,
     template_folder=str(BASE_DIR / "templates"),
@@ -65,7 +78,7 @@ app.register_blueprint(call_ingest_bp)
 @app.route("/")
 def index():
     """Serve the main single-page workspace UI."""
-    return render_template("index.html", config={"PROPOSAL_BASE_PATH": PROPOSAL_BASE_PATH})
+    return render_template("index.html", config=_template_config())
 
 
 @app.route("/health")
@@ -96,7 +109,7 @@ if PROPOSAL_BASE_PATH:
     @app.route(f"{PROPOSAL_BASE_PATH}/")
     def proxy_index():
         """Serve Proposal Studio under the base-path prefix."""
-        return render_template("index.html", config={"PROPOSAL_BASE_PATH": PROPOSAL_BASE_PATH})
+        return render_template("index.html", config=_template_config())
 
     @app.route(f"{PROPOSAL_BASE_PATH}/health")
     def proxy_health():

@@ -785,8 +785,9 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
           notify(`Delete failed: ${e.message}`, 'danger');
         }
       }));
-    } catch (e) {
-      listEl.innerHTML = `<div style="color:var(--red); font-size:13px;">Failed to load proposals: ${esc(e.message)}</div>`;
+      } catch (e) {
+        listEl.innerHTML = `<div style="color:var(--red); font-size:13px;">Failed to load proposals: ${esc(e.message)}</div>`;
+      }
     }
   }
 
@@ -1568,28 +1569,31 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
 
   // ── Event Bindings ────────────────────────────────────────────────────────
   function setupEventListeners() {
-    // Auth overlay: "Sign in with Google" — direct Firebase popup (no redirect
-    // to /app needed; same Firebase project, token lands in shared localStorage).
+    // Sign in directly from Proposal Studio. proposal-auth.js exposes this
+    // function after Firebase has finished restoring the shared session.
     const authBtn = document.getElementById('auth-signin-btn');
     if (authBtn) {
-      authBtn.addEventListener('click', async (e) => {
-        e.preventDefault();
-        if (window.signInWithGooglePopup) {
-          authBtn.disabled = true;
-          try {
-            await window.signInWithGooglePopup();
-            const overlay = document.getElementById('auth-overlay');
-            if (overlay) overlay.classList.add('hidden');
-            await renderLanding();
-          } catch (err) {
-            console.error('Google sign-in failed:', err);
-            notify('Sign-in failed: ' + (err.message || 'unknown error'), 'danger');
-          } finally {
-            authBtn.disabled = false;
+      authBtn.addEventListener('click', async (event) => {
+        event.preventDefault();
+        authBtn.setAttribute('aria-busy', 'true');
+        authBtn.classList.add('is-busy');
+        try {
+          if (window.proposalAuthReady) await window.proposalAuthReady;
+          if (!window.signInWithGooglePopup) {
+            throw new Error('Google sign-in is not ready. Please try again.');
           }
-        } else {
-          // Firebase not loaded yet — fall back to Sightline sign-in page.
-          window.location.href = '/app';
+          await window.signInWithGooglePopup();
+          const overlay = document.getElementById('auth-overlay');
+          if (overlay) overlay.classList.add('hidden');
+          await renderLanding();
+        } catch (error) {
+          if (error?.code !== 'auth/popup-closed-by-user') {
+            console.error('Google sign-in failed:', error);
+            notify(error?.message || 'Google sign-in failed.', 'danger');
+          }
+        } finally {
+          authBtn.removeAttribute('aria-busy');
+          authBtn.classList.remove('is-busy');
         }
       });
     }
@@ -1725,18 +1729,21 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
   }
 
   // ── Auth gate ──────────────────────────────────────────────────────────────────
-  // Check if user is authenticated via shared Firebase (same project as Sightline).
-  // proposal-auth.js provides window.refreshIdToken / signInWithGooglePopup.
+  // Firebase restores its persisted session asynchronously. Wait for that
+  // first decision so /app and /proposal always agree about the signed-in user.
   async function checkAuth() {
-    const token = window.__idToken || localStorage.getItem('id_token');
     const overlay = document.getElementById('auth-overlay');
+    try {
+      if (window.proposalAuthReady) await window.proposalAuthReady;
+    } catch (error) {
+      console.warn('Firebase session restore failed:', error);
+    }
+
+    let token = window.__idToken || localStorage.getItem('id_token');
 
     if (!token) {
-      // No token — if Firebase SDK is ready, try silent re-auth first.
-      if (window.__firebaseAuthReady && !(await trySilentAuth())) {
-        showAuthOverlay();
-      }
-      return true;
+      if (overlay) overlay.classList.remove('hidden');
+      return false;
     }
 
     // Token exists — verify it with the backend
@@ -1751,13 +1758,12 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
         if (overlay) overlay.classList.add('hidden');
         return true;
       } else {
-        // Token expired or invalid — try refresh (works on /proposal and /app)
+        // Token expired or invalid — force-refresh the shared Firebase session.
         if (window.refreshIdToken) {
           try {
             const fresh = await window.refreshIdToken();
             if (fresh) {
-              window.__idToken = fresh;
-              localStorage.setItem('id_token', fresh);
+              token = fresh;
               const res2 = await fetch('/api/auth/me', {
                 headers: { 'Authorization': 'Bearer ' + fresh }
               });
@@ -1770,55 +1776,25 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
             }
           } catch (e) { /* refresh failed */ }
         }
-        // No refresh — show overlay but still allow the app shell to render
-        showAuthOverlay();
-        return true;
+        localStorage.removeItem('id_token');
+        window.__idToken = '';
+        if (overlay) overlay.classList.remove('hidden');
+        return false;
       }
     } catch (e) {
-      // Network error — allow through optimistically
-      if (overlay) overlay.classList.add('hidden');
+      // Keep an existing session usable during a temporary backend outage.
+      if (token && overlay) overlay.classList.add('hidden');
       return true;
     }
-  }
-
-  function showAuthOverlay() {
-    const overlay = document.getElementById('auth-overlay');
-    if (overlay) overlay.classList.remove('hidden');
-  }
-
-  // Silent re-auth: if Firebase already knows this user (signed in on /app),
-  // grab a fresh token without showing anything.
-  async function trySilentAuth() {
-    try {
-      if (typeof window.firebase !== 'undefined' && window.firebase.auth) {
-        const auth = window.firebase.auth();
-        if (auth.currentUser) {
-          const tok = await auth.currentUser.getIdToken(true);
-          localStorage.setItem('id_token', tok);
-          window.__idToken = tok;
-          const res = await fetch('/api/auth/me', {
-            headers: { 'Authorization': 'Bearer ' + tok }
-          });
-          if (res.ok) {
-            window.__currentUser = await res.json();
-            const overlay = document.getElementById('auth-overlay');
-            if (overlay) overlay.classList.add('hidden');
-            return true;
-          }
-        }
-      }
-    } catch (e) { /* silent auth failed */ }
-    return false;
   }
 
   // ── Initialize App ────────────────────────────────────────────────────────
   async function init() {
     setupEventListeners();
-    // Auth gate: verify token if available, show overlay if not
-    await checkAuth();
+    // Auth gate: public donor metadata can load behind the sign-in overlay.
+    const authenticated = await checkAuth();
     await loadDonors();
-    // Landing view first: existing proposals (view/delete) + New CTA
-    await renderLanding();
+    if (authenticated) await renderLanding();
   }
 
   document.addEventListener('DOMContentLoaded', init);
