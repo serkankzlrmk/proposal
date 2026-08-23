@@ -21,6 +21,7 @@ import json
 import logging
 
 from flask import Blueprint, jsonify, request
+from auth import current_role, current_uid, require_auth, require_role
 
 try:
     from proposal.db import get_proposal, lock_step, update_proposal
@@ -75,11 +76,6 @@ def _call_llm(prompt: str, system_prompt: str = "", temperature: float = 0.3) ->
         "temperature": temperature,
     }
     try:
-        logger.warning("LLM call failed: %s", e)
-        return ""
-
-
-    except Exception as e:
         t0 = time.time()
         with httpx.Client(timeout=60.0) as client:
             resp = client.post(f"{LLM_BASE_URL}/chat/completions", headers=headers, json=payload)
@@ -96,6 +92,23 @@ def _call_llm(prompt: str, system_prompt: str = "", temperature: float = 0.3) ->
             except Exception:
                 pass
         return content or ""
+    except Exception as e:
+        logger.warning("LLM call failed: %s", e)
+        return ""
+
+
+def _request_proposal(data: dict):
+    """Resolve the authenticated proposal and preserve admin access."""
+    proposal_id = data.get("proposal_id") or data.get("id")
+    prop = get_proposal(proposal_id) if proposal_id else None
+    if not prop:
+        return proposal_id, None, None, (jsonify({"error": "Proposal not found"}), 404)
+    uid = current_uid()
+    if prop.get("user_id") != uid and current_role() != "admin":
+        return proposal_id, None, None, (jsonify({"error": "Not your proposal"}), 403)
+    return proposal_id, prop, prop.get("user_id"), None
+
+
 def _resolve_donor(prop) -> str:
     return resolve_donor_id(prop.get("donor", "OCHA_CBPF"))
 
@@ -106,10 +119,10 @@ def _risk_report(risk_rows) -> dict:
     issues = []
     for row in risk_rows or []:
         try:
+            r = row if isinstance(row, RiskMatrixItem) else RiskMatrixItem(**row)
+        except Exception as e:
             issues.append({"row": row, "error": f"Invalid risk row: {e}"})
             continue
-        except Exception as e:
-            r = row if isinstance(row, RiskMatrixItem) else RiskMatrixItem(**row)
         risk = {
             **r.model_dump(),
             "severity_score": r.severity_score,
@@ -162,15 +175,14 @@ def _psea_report(psea) -> dict:
 
 
 @step4_api_bp.route("/analyze", methods=["POST"])
+@require_auth
+@require_role("premium")
 def analyze_step4():
     """Full Step 4 validation: risks + budget + PSEA."""
     data = request.get_json(force=True, silent=True) or {}
-    proposal_id = data.get("proposal_id") or data.get("id")
-    user_id = data.get("user_id", "default_user")
-
-    prop = get_proposal(proposal_id, user_id) if proposal_id else None
-    if not prop:
-        return jsonify({"error": "Proposal not found"}), 404
+    proposal_id, prop, user_id, error = _request_proposal(data)
+    if error:
+        return error
 
     budget = prop.get("budget_data") or {}
 
@@ -203,15 +215,14 @@ def analyze_step4():
 
 
 @step4_api_bp.route("/lock", methods=["POST"])
+@require_auth
+@require_role("premium")
 def lock_step4():
     """Freeze Step 4 (budget_data) as an immutable snapshot."""
     data = request.get_json(force=True, silent=True) or {}
-    proposal_id = data.get("proposal_id") or data.get("id")
-    user_id = data.get("user_id", "default_user")
-
-    prop = get_proposal(proposal_id, user_id) if proposal_id else None
-    if not prop:
-        return jsonify({"error": "Proposal not found"}), 404
+    proposal_id, prop, user_id, error = _request_proposal(data)
+    if error:
+        return error
 
     updated = lock_step(proposal_id, 4, user_id=user_id)
     if not updated:
@@ -220,15 +231,14 @@ def lock_step4():
 
 
 @step4_api_bp.route("/summary", methods=["POST"])
+@require_auth
+@require_role("premium")
 def recompute_summary():
     """Persist recomputed budget summary into budget_data (scoring consistency)."""
     data = request.get_json(force=True, silent=True) or {}
-    proposal_id = data.get("proposal_id") or data.get("id")
-    user_id = data.get("user_id", "default_user")
-
-    prop = get_proposal(proposal_id, user_id) if proposal_id else None
-    if not prop:
-        return jsonify({"error": "Proposal not found"}), 404
+    proposal_id, prop, user_id, error = _request_proposal(data)
+    if error:
+        return error
 
     budget = prop.get("budget_data") or {}
     items = budget.get("items") or []
@@ -245,15 +255,14 @@ def recompute_summary():
 
 
 @step4_api_bp.route("/generate-risk", methods=["POST"])
+@require_auth
+@require_role("premium")
 def generate_risk():
     """AI-draft the 5x5 risk matrix from the proposal context (per-subtab agent)."""
     data = request.get_json(force=True, silent=True) or {}
-    proposal_id = data.get("proposal_id") or data.get("id")
-    user_id = data.get("user_id", "default_user")
-
-    prop = get_proposal(proposal_id, user_id) if proposal_id else None
-    if not prop:
-        return jsonify({"error": "Proposal not found"}), 404
+    proposal_id, prop, user_id, error = _request_proposal(data)
+    if error:
+        return error
 
     ctx = prop.get("context_data") or {}
     country = ctx.get("country") or prop.get("country") or "Target Country"
@@ -272,9 +281,6 @@ LANGUAGE POLICY: ALWAYS respond in English.
     risks = []
     if raw:
         try:
-            logger.warning("Risk JSON parse failed: %s", e)
-
-        except Exception as e:
             clean = raw.strip()
             if clean.startswith("```"):
                 clean = clean.split("\n", 1)[1].rsplit("```", 1)[0].strip()
@@ -289,6 +295,8 @@ LANGUAGE POLICY: ALWAYS respond in English.
                     "impact": int(item.get("impact", 2) or 2),
                     "mitigation_strategy": item.get("mitigation_strategy", ""),
                 })
+        except Exception as e:
+            logger.warning("Risk JSON parse failed: %s", e)
     if not risks:
         # Deterministic fallback: one row per category
         risks = [
@@ -308,15 +316,14 @@ LANGUAGE POLICY: ALWAYS respond in English.
 
 
 @step4_api_bp.route("/generate-budget", methods=["POST"])
+@require_auth
+@require_role("premium")
 def generate_budget():
     """AI-draft the itemized budget from the proposal context (per-subtab agent)."""
     data = request.get_json(force=True, silent=True) or {}
-    proposal_id = data.get("proposal_id") or data.get("id")
-    user_id = data.get("user_id", "default_user")
-
-    prop = get_proposal(proposal_id, user_id) if proposal_id else None
-    if not prop:
-        return jsonify({"error": "Proposal not found"}), 404
+    proposal_id, prop, user_id, error = _request_proposal(data)
+    if error:
+        return error
 
     ctx = prop.get("context_data") or {}
     country = ctx.get("country") or prop.get("country") or "Target Country"
@@ -327,15 +334,13 @@ def generate_budget():
     currency = "USD"
     budget_max = None
     try:
-        pass
-
-    except Exception:
-        from engine.yaml_rules import YamlDonorRuleLoader
         loader = YamlDonorRuleLoader()
         manifest = loader.load(donor)
         if manifest:
             currency = manifest.currency or "USD"
             budget_max = manifest.budget_max
+    except Exception as e:
+        logger.warning("Donor budget rules could not be loaded for %s: %s", donor, e)
     prompt = f"""
 Draft an itemized budget for a humanitarian proposal in {country} ({theme}) for donor {donor}.
 Budget currency: {currency}. Budget ceiling: {budget_max or 'not specified'} {currency} max — MUST NOT exceed.
@@ -348,9 +353,6 @@ LANGUAGE POLICY: ALWAYS respond in English.
     items = []
     if raw:
         try:
-            logger.warning("Budget JSON parse failed: %s", e)
-
-        except Exception as e:
             clean = raw.strip()
             if clean.startswith("```"):
                 clean = clean.split("\n", 1)[1].rsplit("```", 1)[0].strip()
@@ -365,6 +367,8 @@ LANGUAGE POLICY: ALWAYS respond in English.
                     "unit_count": float(item.get("unit_count", 1) or 1),
                     "unit_cost": float(item.get("unit_cost", 0) or 0),
                 })
+        except Exception as e:
+            logger.warning("Budget JSON parse failed: %s", e)
     if not items:
         items = [
             {"category": "personnel", "description": "Project Manager", "unit_type": "month", "unit_count": 12, "unit_cost": 2500},

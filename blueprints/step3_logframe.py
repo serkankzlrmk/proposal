@@ -19,6 +19,7 @@ Endpoints:
 import logging
 
 from flask import Blueprint, jsonify, request
+from auth import current_role, current_uid, require_auth, require_role
 
 try:
     from proposal.db import get_proposal, lock_step, update_proposal
@@ -40,6 +41,18 @@ logger = logging.getLogger(__name__)
 step3_api_bp = Blueprint("step3_logframe", __name__, url_prefix="/api/proposal-v2/steps/3")
 
 
+def _request_proposal(data: dict):
+    """Resolve the authenticated proposal and preserve admin access."""
+    proposal_id = data.get("proposal_id") or data.get("id")
+    prop = get_proposal(proposal_id) if proposal_id else None
+    if not prop:
+        return proposal_id, None, None, (jsonify({"error": "Proposal not found"}), 404)
+    uid = current_uid()
+    if prop.get("user_id") != uid and current_role() != "admin":
+        return proposal_id, None, None, (jsonify({"error": "Not your proposal"}), 403)
+    return proposal_id, prop, prop.get("user_id"), None
+
+
 def _resolve_donor(prop) -> str:
     donor_key = (prop.get("donor") or "OCHA_CBPF").lower().replace("_", "")
     alias_map = {"ochacbpf": "ocha_cbpf", "usaidbha": "usaid_bha", "euprag": "eu_prag"}
@@ -56,15 +69,14 @@ def _smart_report_for(logframe) -> dict:
 
 
 @step3_api_bp.route("/analyze", methods=["POST"])
+@require_auth
+@require_role("premium")
 def analyze_step3():
     """SMART validation + donor smart_criteria score for the current logframe."""
     data = request.get_json(force=True, silent=True) or {}
-    proposal_id = data.get("proposal_id") or data.get("id")
-    user_id = data.get("user_id", "default_user")
-
-    prop = get_proposal(proposal_id, user_id) if proposal_id else None
-    if not prop:
-        return jsonify({"error": "Proposal not found"}), 404
+    proposal_id, prop, user_id, error = _request_proposal(data)
+    if error:
+        return error
 
     # Optional payload override: parse free-text indicators into structured
     logframe = prop.get("logframe_data") or {}
@@ -96,15 +108,14 @@ def analyze_step3():
 
 
 @step3_api_bp.route("/lock", methods=["POST"])
+@require_auth
+@require_role("premium")
 def lock_step3():
     """Freeze Step 3 (logframe_data) as an immutable snapshot."""
     data = request.get_json(force=True, silent=True) or {}
-    proposal_id = data.get("proposal_id") or data.get("id")
-    user_id = data.get("user_id", "default_user")
-
-    prop = get_proposal(proposal_id, user_id) if proposal_id else None
-    if not prop:
-        return jsonify({"error": "Proposal not found"}), 404
+    proposal_id, prop, user_id, error = _request_proposal(data)
+    if error:
+        return error
 
     updated = lock_step(proposal_id, 3, user_id=user_id)
     if not updated:
@@ -113,15 +124,14 @@ def lock_step3():
 
 
 @step3_api_bp.route("/generate", methods=["POST"])
+@require_auth
+@require_role("premium")
 def generate_step3():
     """LLM-generated structured logframe (goal/outcomes/outputs + matrix)."""
     data = request.get_json(force=True, silent=True) or {}
-    proposal_id = data.get("proposal_id") or data.get("id")
-    user_id = data.get("user_id", "default_user")
-
-    prop = get_proposal(proposal_id, user_id) if proposal_id else None
-    if not prop:
-        return jsonify({"error": "Proposal not found"}), 404
+    proposal_id, prop, user_id, error = _request_proposal(data)
+    if error:
+        return error
 
     ctx = prop.get("context_data") or {}
     toc = prop.get("toc_data") or {}

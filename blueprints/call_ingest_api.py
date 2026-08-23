@@ -101,9 +101,6 @@ def _generate_brief(corpus: str, extracted: Dict[str, Any], draft: Dict[str, Any
     extraction_used_fallback = extracted.get("extraction_mode") == "deterministic"
     if not extraction_used_fallback:
         try:
-            logger.warning("Brief generation failed: %s", e)
-
-        except Exception as e:
             from engine.generator import _call_llm
 
             reqs = "\n".join(f"- {r}" for r in (extracted.get("requirements") or [])[:12])
@@ -134,6 +131,8 @@ def _generate_brief(corpus: str, extracted: Dict[str, Any], draft: Dict[str, Any
             )
             if raw and raw.strip():
                 return raw.strip()[:6000]
+        except Exception as e:
+            logger.warning("Brief generation failed: %s", e)
     # Deterministic fallback
     reqs = "\n".join(f"- {r}" for r in (extracted.get("requirements") or [])[:10]) or "- (none extracted)"
     return (
@@ -156,9 +155,6 @@ def _generate_call_identity(corpus: str, extracted: Dict[str, Any]) -> Dict[str,
     summary = str(extracted.get("summary") or "").strip()
     if extracted.get("extraction_mode") != "deterministic":
         try:
-            logger.warning("Call identity generation failed: %s", e)
-
-        except Exception as e:
             from engine.generator import _call_llm
 
             raw = _call_llm(
@@ -184,6 +180,8 @@ def _generate_call_identity(corpus: str, extracted: Dict[str, Any]) -> Dict[str,
                 call_id = _slug_call_id(str(parsed.get("call_id") or name))
                 if name:
                     return {"display_name": name, "call_id": call_id}
+        except Exception as e:
+            logger.warning("Call identity generation failed: %s", e)
     # Deterministic fallback still derives the label from the uploaded content.
     call_title_match = re.search(
         r"(?im)^\s*((?:grant|funding|open)\s+call[^\n]{0,160})$",
