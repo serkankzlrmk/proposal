@@ -246,9 +246,9 @@ def autosave_proposal(proposal_id: str):
     data = request.get_json(force=True, silent=True) or {}
     user_id = uid
     try:
-        return jsonify({"error": str(e), "code": "STEP_LOCKED"}), 409
-    except ProposalLockedError as e:
         updated = update_proposal(proposal_id, data, user_id=user_id)
+    except ProposalLockedError as e:
+        return jsonify({"error": str(e), "code": "STEP_LOCKED"}), 409
     if not updated:
         return jsonify({"error": "Proposal not found or update failed"}), 404
     return jsonify({"proposal": updated})
