@@ -18,9 +18,18 @@ HOST = os.getenv("PROPOSAL_HOST", "0.0.0.0")
 DEBUG = os.getenv("PROPOSAL_DEBUG", "true").lower() in ("1", "true", "yes")
 
 # Database Path
-DB_PATH = Path(os.getenv("DB_PATH", str(BASE_DIR / "data" / "proposal.db")))
+# Embedded mode: PROPOSAL_DB_PATH wins (set by docker-compose app env) so the
+# Proposal DB stays separate from Sightline's reliefweb.db. Fallback chain:
+# PROPOSAL_DB_PATH -> DB_PATH -> repo-local proposal.db.
+DB_PATH = Path(
+    os.getenv("PROPOSAL_DB_PATH")
+    or os.getenv("DB_PATH")
+    or str(BASE_DIR / "data" / "proposal.db")
+)
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", str(BASE_DIR / "output")))
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+# NOTE: no mkdir at import time — the embedded deployment mounts the proposal
+# repo read-only (:/app/proposal:ro); callers must create OUTPUT_DIR lazily
+# (see typst_engine.compiler._ensure_output_dir).
 
 # LLM Configuration (Compatible with OpenRouter / OpenAI)
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
