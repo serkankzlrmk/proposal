@@ -268,6 +268,8 @@ STRUCTURE RULES (MANDATORY):
   project duration; do not use reductions in reporting as a success measure.
 - Means of verification for case management or psychosocial data MUST state
   anonymization, confidentiality and informed-consent safeguards.
+- When donor requirements reference Sphere or CPMS, tie at least one outcome
+  indicator and its verification method to the relevant named standard.
 
 DONOR REQUIREMENTS (from the call manifest — indicators must satisfy these):
     {donor_reqs}
@@ -406,7 +408,23 @@ def project_logframe_to_matrix(structured: Dict[str, Any], harden: bool = False)
 
     def _ind_text(ind) -> str:
         if isinstance(ind, dict):
-            return _harden_text(str(ind.get("narrative", "")))
+            text = str(ind.get("narrative", ""))
+            if harden:
+                from engine.smart_parser import smart_validation_result
+
+                result = smart_validation_result(text)
+                target = ind.get("target_value")
+                unit = str(ind.get("unit") or "results").strip()
+                if "measurable" in result["failed"] and target not in (None, "", 0, 0.0):
+                    target_text = f"{float(target):g}%" if unit.lower() == "percent" else f"{float(target):g} {unit}"
+                    text = f"{text}; target {target_text}"
+                timeframe = str(ind.get("timeframe") or "").strip()
+                if "time_bound" in smart_validation_result(text)["failed"] and timeframe:
+                    text = f"{text}; {timeframe}"
+                disaggregation = ind.get("disaggregated_by") or []
+                if "disaggregation" in smart_validation_result(text)["failed"] and disaggregation:
+                    text = f"{text}; disaggregated by {', '.join(map(str, disaggregation))}"
+            return _harden_text(text)
         return _harden_text(str(ind))
 
     rows = []
@@ -441,6 +459,31 @@ def project_logframe_to_matrix(structured: Dict[str, Any], harden: bool = False)
             })
     out["matrix"] = rows
     return out
+
+
+def _render_indicator_list(logframe_data: Dict[str, Any], max_chars: int) -> str:
+    """Render canonical structured targets without LLM placeholder drift."""
+    entries = []
+    entries.extend(("Impact", item) for item in (logframe_data.get("goal_indicators") or []))
+    for outcome in logframe_data.get("outcomes") or []:
+        entries.extend((f"Outcome {outcome.get('outcome_id', '')}", item) for item in (outcome.get("indicators") or []))
+        for output in outcome.get("outputs") or []:
+            entries.extend((f"Output {output.get('output_id', '')}", item) for item in (output.get("indicators") or []))
+
+    lines = ["The following indicators are the authoritative monitoring targets for this proposal:"]
+    for level, item in entries:
+        if not isinstance(item, dict):
+            continue
+        target = item.get("target_value")
+        unit = str(item.get("unit") or "results")
+        target_text = f"{float(target):g}%" if unit.lower() == "percent" and target is not None else f"{target} {unit}"
+        mov = str(item.get("means_of_verification") or "Project monitoring records")
+        lines.append(
+            f"- {level} / {item.get('indicator_id', 'indicator')}: {item.get('narrative', '')}. "
+            f"Target: {target_text}; timeframe: {item.get('timeframe', 'by end of project')}; "
+            f"baseline: {item.get('baseline', 0)}; verification: {mov}."
+        )
+    return "\n".join(lines)[:max_chars].strip()
 
 
 def generate_narrative_sections(logframe_data: Dict[str, Any], context_data: Dict[str, Any], donor: str = "OCHA_CBPF") -> Dict[str, str]:
@@ -499,6 +542,10 @@ def generate_narrative_sections(logframe_data: Dict[str, Any], context_data: Dic
         key = sec["key"]
         title = sec["title"]
         max_c = sec["max_chars"]
+
+        if str(key).strip().lower().replace("_", " ") == "list of indicators":
+            sections[key] = _render_indicator_list(logframe_data, max_c)
+            continue
 
         prompt = f"""
         Draft the '{title}' section for a {donor} proposal in {country} ({theme}).

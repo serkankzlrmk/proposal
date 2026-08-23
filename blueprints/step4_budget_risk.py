@@ -191,6 +191,30 @@ def _normalize_generated_budget(items, budget_max, overhead_cap_percent):
     return normalized
 
 
+def _render_budget_template(items, currency, budget_max, overhead_cap_percent):
+    """Render one authoritative narrative budget from the saved line items."""
+    lines = [
+        "Final Consolidated Budget",
+        f"Currency: {currency}; donor ceiling: {float(budget_max):,.2f} {currency}; "
+        f"indirect-cost cap: {float(overhead_cap_percent):g}% of direct costs.",
+    ]
+    for item in items or []:
+        count = float(item.get("unit_count", 0))
+        cost = float(item.get("unit_cost", 0))
+        lines.append(
+            f"- {item.get('description', '')} [{item.get('category', '')}]: "
+            f"{count:g} {item.get('unit_type', 'unit')} × {cost:,.2f} = {count * cost:,.2f} {currency}."
+        )
+    summary = compute_budget_summary(items or [])
+    lines.append(f"Direct subtotal: {summary['direct_total']:,.2f} {currency}.")
+    lines.append(
+        f"Indirect costs: {summary['indirect_total']:,.2f} {currency} "
+        f"({summary['overhead_percent']:.2f}% of direct costs)."
+    )
+    lines.append(f"Grand total: {summary['grand_total']:,.2f} {currency}.")
+    return "\n".join(lines)[:3000]
+
+
 def _psea_report(psea) -> dict:
     p = psea if isinstance(psea, PseaCommitments) else PseaCommitments(**psea)
     missing = [
@@ -432,7 +456,18 @@ LANGUAGE POLICY: ALWAYS respond in English.
     budget["overhead_cap_percent"] = overhead_cap_percent
     if budget_max:
         budget["budget_max"] = budget_max
-    updated = update_proposal(proposal_id, {"budget_data": budget}, user_id=user_id)
+    fields = {"budget_data": budget}
+    narrative = dict(prop.get("narrative_data") or {})
+    budget_section = next(
+        (key for key in narrative if str(key).strip().lower().replace("_", " ") == "budget template"),
+        None,
+    )
+    if budget_section and 4 not in set(prop.get("locked_steps") or []):
+        narrative[budget_section] = _render_budget_template(
+            items, currency, budget_max or 0, overhead_cap_percent
+        )
+        fields["narrative_data"] = narrative
+    updated = update_proposal(proposal_id, fields, user_id=user_id)
     if not updated:
         return jsonify({"error": "Proposal not found"}), 404
     return jsonify({"status": "ok", "items": items, "currency": currency, "proposal": updated})
