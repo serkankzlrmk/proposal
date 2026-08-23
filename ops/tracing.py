@@ -17,9 +17,14 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+try:
+    from proposal.config import USAGE_LEDGER_PATH
+except ImportError:
+    from config import USAGE_LEDGER_PATH
+
 logger = logging.getLogger(__name__)
 
-LEDGER_PATH = Path(__file__).resolve().parent.parent / "ops" / "usage.jsonl"
+LEDGER_PATH = Path(USAGE_LEDGER_PATH)
 
 # Rough per-1K-token cost table (USD) for common OpenRouter models.
 # Used only when the provider does not report cost; estimates, not billing.

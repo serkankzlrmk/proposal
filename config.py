@@ -39,6 +39,14 @@ DONORS_DIR = Path(
         else str(BUILTIN_DONORS_DIR)
     )
 )
+USAGE_LEDGER_PATH = Path(
+    os.getenv("PROPOSAL_USAGE_LEDGER_PATH")
+    or (
+        str(DB_PATH.parent / "proposal_usage.jsonl")
+        if os.getenv("PROPOSAL_DB_PATH")
+        else str(BASE_DIR / "ops" / "usage.jsonl")
+    )
+)
 # NOTE: no mkdir at import time — the embedded deployment mounts the proposal
 # repo read-only (:/app/proposal:ro); callers must create OUTPUT_DIR lazily
 # (see typst_engine.compiler._ensure_output_dir).

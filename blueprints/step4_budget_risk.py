@@ -158,6 +158,39 @@ def _budget_report(budget_data) -> dict:
     }
 
 
+def _normalize_generated_budget(items, budget_max, overhead_cap_percent):
+    """Enforce donor ceiling and indirect-cost cap on an AI budget draft."""
+    normalized = [dict(item) for item in (items or [])]
+    direct = [item for item in normalized if item.get("category") != "indirect_overhead"]
+    indirect = [item for item in normalized if item.get("category") == "indirect_overhead"]
+
+    direct_total = sum(float(item.get("unit_count", 0)) * float(item.get("unit_cost", 0)) for item in direct)
+    indirect_total = sum(float(item.get("unit_count", 0)) * float(item.get("unit_cost", 0)) for item in indirect)
+    allowed_indirect = direct_total * max(0.0, float(overhead_cap_percent or 0)) / 100.0
+    if indirect_total > allowed_indirect and indirect_total > 0:
+        overhead_factor = allowed_indirect / indirect_total
+        for item in indirect:
+            item["unit_cost"] = round(float(item.get("unit_cost", 0)) * overhead_factor, 2)
+
+    total = sum(float(item.get("unit_count", 0)) * float(item.get("unit_cost", 0)) for item in normalized)
+    if budget_max and total > float(budget_max) and total > 0:
+        ceiling_factor = float(budget_max) / total
+        for item in normalized:
+            item["unit_cost"] = round(float(item.get("unit_cost", 0)) * ceiling_factor, 2)
+
+        # Cent rounding can leave a tiny excess; trim it deterministically.
+        rounded_total = sum(float(item.get("unit_count", 0)) * float(item.get("unit_cost", 0)) for item in normalized)
+        excess = rounded_total - float(budget_max)
+        if excess > 0:
+            adjustable = next((item for item in normalized if float(item.get("unit_count", 0)) > 0), None)
+            if adjustable:
+                count = float(adjustable.get("unit_count", 0))
+                cost = float(adjustable.get("unit_cost", 0))
+                adjustable["unit_cost"] = round(max(0.0, cost - (excess / count) - 0.01), 2)
+
+    return normalized
+
+
 def _psea_report(psea) -> dict:
     p = psea if isinstance(psea, PseaCommitments) else PseaCommitments(**psea)
     missing = [
@@ -333,12 +366,14 @@ def generate_budget():
     # Manifest currency / budget ceiling (call-specific rules)
     currency = "USD"
     budget_max = None
+    overhead_cap_percent = 7.0
     try:
         loader = YamlDonorRuleLoader()
         manifest = loader.load(donor)
         if manifest:
             currency = manifest.currency or "USD"
             budget_max = manifest.budget_max
+            overhead_cap_percent = manifest.overhead_cap_percent
     except Exception as e:
         logger.warning("Donor budget rules could not be loaded for %s: %s", donor, e)
     prompt = f"""
@@ -346,7 +381,7 @@ Draft an itemized budget for a humanitarian proposal in {country} ({theme}) for 
 Budget currency: {currency}. Budget ceiling: {budget_max or 'not specified'} {currency} max — MUST NOT exceed.
 Return ONLY JSON: a list of 8-12 budget line items.
 Each object: {{"category": "personnel|travel_transport|equipment_supplies|contractual|direct_operational|indirect_overhead", "description": "...", "unit_type": "...", "unit_count": number, "unit_cost": number}}
-Indirect overhead must stay under the donor cap (7% of direct costs).
+Indirect overhead must stay at or below {overhead_cap_percent}% of direct costs.
 LANGUAGE POLICY: ALWAYS respond in English.
 """
     raw = _call_llm(prompt, temperature=0.3)
@@ -377,12 +412,15 @@ LANGUAGE POLICY: ALWAYS respond in English.
             {"category": "equipment_supplies", "description": "WASH kits", "unit_type": "kit", "unit_count": 2000, "unit_cost": 25},
             {"category": "contractual", "description": "Training facilitators", "unit_type": "session", "unit_count": 12, "unit_cost": 500},
             {"category": "direct_operational", "description": "Office running costs", "unit_type": "month", "unit_count": 12, "unit_cost": 800},
-            {"category": "indirect_overhead", "description": "Indirect costs (7% cap)", "unit_type": "lump", "unit_count": 1, "unit_cost": 0},
+            {"category": "indirect_overhead", "description": f"Indirect costs ({overhead_cap_percent}% cap)", "unit_type": "lump", "unit_count": 1, "unit_cost": 0},
         ]
+
+    items = _normalize_generated_budget(items, budget_max, overhead_cap_percent)
 
     budget = dict(prop.get("budget_data") or {})
     budget["items"] = items
     budget["currency"] = currency
+    budget["overhead_cap_percent"] = overhead_cap_percent
     if budget_max:
         budget["budget_max"] = budget_max
     updated = update_proposal(proposal_id, {"budget_data": budget}, user_id=user_id)
