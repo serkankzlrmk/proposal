@@ -14,6 +14,7 @@ venv/
 # ── Secrets ─────────────────────────────────────────────
 .env
 .env.*
+!.env.example
 
 # ── Runtime data (asla commit'e girmez) ─────────────────
 data/*.db

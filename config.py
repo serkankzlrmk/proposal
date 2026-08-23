@@ -3,6 +3,7 @@ proposal/config.py — Configuration for Proposal Design Pipeline.
 """
 
 import os
+import secrets
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -15,7 +16,7 @@ load_dotenv(BASE_DIR / ".env")
 
 PORT = int(os.getenv("PROPOSAL_PORT", "5002"))
 HOST = os.getenv("PROPOSAL_HOST", "0.0.0.0")
-DEBUG = os.getenv("PROPOSAL_DEBUG", "true").lower() in ("1", "true", "yes")
+DEBUG = os.getenv("PROPOSAL_DEBUG", "false").lower() in ("1", "true", "yes")
 
 # Database Path
 # Embedded mode: PROPOSAL_DB_PATH wins (set by docker-compose app env) so the
@@ -57,8 +58,12 @@ LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://openrouter.ai/api/v1")
 LLM_MODEL = os.getenv("LLM_MODEL", "google/gemini-2.5-flash")
 VERIFIER_MODEL = os.getenv("VERIFIER_MODEL", "google/gemini-2.5-pro")
 
-# Secret key for Flask sessions
-SECRET_KEY = os.getenv("SECRET_KEY", "proposal-design-secret-key-2026")
+# Secret key for Flask sessions.
+# No hardcoded fallback: a public default would let anyone forge sessions.
+# Production MUST set SECRET_KEY in the environment. If unset, a random
+# per-process key is generated (sessions won't survive a restart, but the
+# app stays safe rather than silently using a known key).
+SECRET_KEY = os.getenv("SECRET_KEY") or secrets.token_hex(32)
 
 # ── Auth Configuration ────────────────────────────────────────────────────────
 # Shares Firebase project with Sightline (same domain, same user pool).
