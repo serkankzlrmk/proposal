@@ -831,6 +831,26 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
         }
       }));
       } catch (e) {
+        // Anonymous freemium: /api/proposals requires auth — show a
+        // sign-in prompt instead of a raw error. The shared api() helper
+        // opens the auth overlay on 401; close it here so the landing
+        // card is what the visitor sees (the card's button re-opens it).
+        if (e.status === 401 || (e.message && e.message.includes('Authentication required'))) {
+          const overlay = document.getElementById('auth-overlay');
+          if (overlay) overlay.classList.add('hidden');
+          listEl.innerHTML = `
+          <div class="glass-card" style="text-align:center; padding:40px 20px;">
+            <div style="font-size:15px; font-weight:600; color:var(--text); margin-bottom:6px;">Sign in to create proposals</div>
+            <div style="font-size:12.5px; color:var(--text-secondary); margin-bottom:16px;">Browse the donor calls and how-it-works freely — sign in to upload your own call and generate a donor-ready draft.</div>
+            <button class="btn btn-primary" id="btnSignInProposals">Sign in with Google</button>
+          </div>`;
+          const btnSignIn = document.getElementById('btnSignInProposals');
+          if (btnSignIn) btnSignIn.addEventListener('click', () => {
+            const overlay = document.getElementById('auth-overlay');
+            if (overlay) overlay.classList.remove('hidden');
+          });
+          return;
+        }
         listEl.innerHTML = `<div style="color:var(--red); font-size:13px;">Failed to load proposals: ${esc(e.message)}</div>`;
       }
     }
@@ -1555,6 +1575,14 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
   }
 
   async function createNewProposal() {
+    // Anonymous freemium: creating a proposal requires sign-in — show the
+    // auth overlay instead of the upload modal.
+    const token = window.__idToken || localStorage.getItem('id_token');
+    if (!token) {
+      const overlay = document.getElementById('auth-overlay');
+      if (overlay) overlay.classList.remove('hidden');
+      return;
+    }
     // Every new proposal begins from user-uploaded donor source documents.
     document.getElementById('newProposalModal').style.display = 'flex';
   }
@@ -1797,7 +1825,10 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
     let token = window.__idToken || localStorage.getItem('id_token');
 
     if (!token) {
-      if (overlay) overlay.classList.remove('hidden');
+      // Anonymous freemium mode: no overlay — the landing (published calls,
+      // sample proposals, how-it-works) is public. Creation actions prompt
+      // sign-in on demand.
+      window.__currentUser = null;
       return false;
     }
 
@@ -1846,10 +1877,12 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
   // ── Initialize App ────────────────────────────────────────────────────────
   async function init() {
     setupEventListeners();
-    // Auth gate: public donor metadata can load behind the sign-in overlay.
+    // Auth gate: public donor metadata + published calls load behind the
+    // sign-in overlay. Anonymous visitors can browse the landing — only
+    // creating/generating proposals requires sign-in.
     const authenticated = await checkAuth();
     await loadDonors();
-    if (authenticated) await renderLanding();
+    await renderLanding();
   }
 
   document.addEventListener('DOMContentLoaded', init);
