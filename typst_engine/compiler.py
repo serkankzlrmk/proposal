@@ -4,6 +4,7 @@ proposal/typst_engine/compiler.py — Sub-10ms Typst PDF generator for Proposal 
 
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -60,6 +61,21 @@ def _section_title(value: Any) -> str:
     for source, target in (("Ngo", "NGO"), ("Psea", "PSEA"), ("Cefm", "CEFM"), ("Mou", "MoU")):
         title = title.replace(source, target)
     return title
+
+
+def _display_text(value: Any) -> str:
+    """Normalize common LLM Markdown into clean publication text.
+
+    Typst source is escaped later, so Markdown emphasis would otherwise be
+    printed literally as **asterisks** in the exported PDF.
+    """
+    text = str(value or "").replace("\r\n", "\n")
+    text = re.sub(r"(?m)^\s{0,3}#{1,6}\s*", "", text)
+    text = re.sub(r"(?m)^\s*[-*]\s+", "• ", text)
+    text = text.replace("**", "").replace("__", "")
+    text = re.sub(r"\s+\*\s+(?=[A-Za-z])", " • ", text)
+    text = re.sub(r"(?<!\w)[*_](?=\S)|(?<=\S)[*_](?!\w)", "", text)
+    return text.strip()
 
 
 def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str, Any]] = None) -> str:
@@ -170,13 +186,13 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
         _title = _section_titles.get(_key, _section_title(_key))
         narrative_sections_block += (
             f"== {escape_typst(_title)}\n\n"
-            f"{escape_typst(str(_text))}\n\n"
+            f"{escape_typst(_display_text(_text))}\n\n"
             f"#v(6pt)\n"
         )
 
     logframe = proposal.get("logframe_data") or {}
     toc = proposal.get("toc_data") or {}
-    toc_narrative = (
+    toc_narrative = _display_text(
         logframe.get("theory_of_change_narrative")
         or toc.get("theory_of_change_narrative")
         or toc.get("narrative")
@@ -202,7 +218,7 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
             if not isinstance(it, dict):
                 continue
             cat = escape_typst(_section_title(it.get("category", "")))
-            desc = escape_typst(it.get("description", ""))
+            desc = escape_typst(_display_text(it.get("description", "")))
             uc = float(it.get("unit_cost", 0) or 0)
             cnt = float(it.get("unit_count", 0) or 0)
             total = round(cnt * uc, 2)
@@ -254,14 +270,14 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
             if not isinstance(r, dict):
                 continue
             cat = escape_typst(_section_title(r.get("category", "")))
-            desc = escape_typst(r.get("description", ""))
+            desc = escape_typst(_display_text(r.get("description", "")))
             lk = int(r.get("likelihood", 1) or 1)
             im = int(r.get("impact", 1) or 1)
             sev = lk * im
             tag = "red" if sev >= 15 else ("amber" if sev >= 8 else "green")
             tag_fill = {"red": "fecaca", "amber": "fde68a", "green": "bbf7d0"}[tag]
             fill_expr = 'rgb("' + tag_fill + '")'
-            mit = escape_typst(r.get("mitigation_strategy", ""))
+            mit = escape_typst(_display_text(r.get("mitigation_strategy", "")))
             risk_rows += (
                 f"  [{cat}], [{desc}], [{lk}], [{im}], "
                 f"[#block(fill: {fill_expr}, inset: 2pt, radius: 2pt)[*{sev}*]], [{mit}],\n"
@@ -411,13 +427,13 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
   [
     #text(8pt, weight: "bold", fill: rgb("0369a1"))[""" + escape_typst(summary_label) + """]\\
     #v(2pt)
-    """ + escape_typst(summary_text) + """
+    """ + escape_typst(_display_text(summary_text)) + """
   ]
 )
 
 #v(4pt)
 == Humanitarian Situation & Needs Assessment
-""" + escape_typst(situation_text) + """
+""" + escape_typst(_display_text(situation_text)) + """
 
 """ + narrative_sections_block + """
 
@@ -449,10 +465,10 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
 
     for item in matrix:
         lvl = escape_typst(item.get("level", ""))
-        lgc = escape_typst(item.get("logic", ""))
-        ind = escape_typst(item.get("indicators", ""))
-        mov = escape_typst(item.get("mov", ""))
-        ass = escape_typst(item.get("assumptions", ""))
+        lgc = escape_typst(_display_text(item.get("logic", "")))
+        ind = escape_typst(_display_text(item.get("indicators", "")))
+        mov = escape_typst(_display_text(item.get("mov", "")))
+        ass = escape_typst(_display_text(item.get("assumptions", "")))
         doc += f"  [*{lvl}*], [{lgc}], [{ind}], [{mov}], [{ass}],\n"
 
     doc += """
@@ -479,6 +495,7 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
   fill: rgb(""" + '"' + block_fill + '"' + """),
   inset: 9pt,
   radius: 4pt,
+  breakable: false,
   stroke: 1pt + rgb(""" + '"' + block_stroke + '"' + """),
   width: 100%,
   [
