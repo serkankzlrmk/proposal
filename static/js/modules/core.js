@@ -14,7 +14,7 @@ function _getIdToken() {
   return '';
 }
 
-export async function api(url, options = {}) {
+async function authorizedResponse(url, options = {}) {
   const token = _getIdToken();
   const headers = { ...options.headers };
   // Let the browser generate multipart/form-data's boundary. Setting a bare
@@ -40,7 +40,15 @@ export async function api(url, options = {}) {
     throw error;
   }
 
-  return res.json();
+  return res;
+}
+
+export async function api(url, options = {}) {
+  return (await authorizedResponse(url, options)).json();
+}
+
+export async function apiBlob(url, options = {}) {
+  return (await authorizedResponse(url, options)).blob();
 }
 
 export function esc(value) {

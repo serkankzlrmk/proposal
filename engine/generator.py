@@ -410,7 +410,10 @@ def project_logframe_to_matrix(structured: Dict[str, Any], harden: bool = False)
         if isinstance(ind, dict):
             text = str(ind.get("narrative", ""))
             if harden:
-                from engine.smart_parser import smart_validation_result
+                from engine.smart_parser import PATTERN_NON_PERSON_INDICATOR, smart_validation_result
+
+                if PATTERN_NON_PERSON_INDICATOR.search(text):
+                    ind["disaggregated_by"] = []
 
                 result = smart_validation_result(text)
                 target = ind.get("target_value")

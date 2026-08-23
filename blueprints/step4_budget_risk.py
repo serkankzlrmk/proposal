@@ -413,6 +413,8 @@ Return ONLY JSON: a list of 8-12 budget line items.
 Each object: {{"category": "personnel|travel_transport|equipment_supplies|contractual|direct_operational|indirect_overhead", "description": "...", "unit_type": "...", "unit_count": number, "unit_cost": number}}
 Indirect overhead must stay at or below {overhead_cap_percent}% of direct costs.
 Every non-overhead line MUST directly support a named activity or output above.
+Budget quantities for meetings, sessions, materials and participants MUST match
+the corresponding numeric target in the logframe unless explicitly justified.
 Do not add generic kits, winterization, WASH, shelter, food or other commodities
 unless they explicitly appear in the project logframe or narrative.
 LANGUAGE POLICY: ALWAYS respond in English.

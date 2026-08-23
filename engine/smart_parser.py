@@ -44,7 +44,8 @@ PATTERN_DISAGG = re.compile(
 )
 PATTERN_NON_PERSON_INDICATOR = re.compile(
     r"\b(manuals?|pathways?|policies|systems?|facilities|sessions?|trainings?|"
-    r"referrals?|protocols?|mechanisms?|materials?|reports?|meetings?|institutions?)\b",
+    r"referrals?|protocols?|mechanisms?|materials?|reports?|meetings?|institutions?|"
+    r"memoranda|mous?|agreements?)\b",
     re.I,
 )
 PATTERN_SPECIFIC = re.compile(r".{15,}", re.S)

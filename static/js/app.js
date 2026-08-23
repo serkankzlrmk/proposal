@@ -1,4 +1,4 @@
-import { api, esc, notify, confirmAction, beginActivity, setButtonBusy } from './modules/core.js';
+import { api, apiBlob, esc, notify, confirmAction, beginActivity, setButtonBusy } from './modules/core.js';
 import { applyStepLockState } from './modules/workspace-state.js';
 import { renderCallList, renderCallDetail } from './modules/donor-intelligence.js';
 
@@ -1466,12 +1466,26 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
     }
   }
 
-  function handleExportPdf() {
+  async function handleExportPdf() {
     if (!state.activeProposalId) return;
     const activity = beginActivity({ title: 'Preparing proposal PDF', detail: 'Formatting the latest saved proposal for export…' });
     notify('PDF preparation started. Your download will begin shortly.', 'info');
-    window.location.href = `/api/proposals/${state.activeProposalId}/export/pdf`;
-    window.setTimeout(() => activity.success('PDF export was sent to your downloads.'), 1400);
+    try {
+      await saveCurrentState();
+      const blob = await apiBlob(`/api/proposals/${state.activeProposalId}/export/pdf`);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${state.proposal?.title || 'proposal'}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      activity.success('PDF export was sent to your downloads.');
+    } catch (e) {
+      activity.fail(`PDF export failed: ${e.message}`);
+      notify(`PDF export failed: ${e.message}`, 'danger');
+    }
   }
 
   // ── Proposal Management ───────────────────────────────────────────────────
