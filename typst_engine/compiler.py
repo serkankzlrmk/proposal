@@ -114,6 +114,7 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
         )
     if not audit_lines:
         audit_lines.append("• Deterministic compliance scoring completed against donor manifest.")
+    audit_summary = " ".join(audit_lines)
 
     # ── Eligibility verdict block (real status, not hardcoded PASS) ────────
     if eligibility_status == "AUTOMATIC_REJECTION":
@@ -516,7 +517,7 @@ def render_typst_document(proposal: Dict[str, Any], analysis: Optional[Dict[str,
         ]\\
         #v(2pt)
         #text(8pt, fill: rgb("4b5563"))[
-          """ + "\\\n".join(audit_lines) + """
+          """ + audit_summary + """
         ]
       ]
     )
