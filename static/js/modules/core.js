@@ -16,7 +16,12 @@ function _getIdToken() {
 
 export async function api(url, options = {}) {
   const token = _getIdToken();
-  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  const headers = { ...options.headers };
+  // Let the browser generate multipart/form-data's boundary. Setting a bare
+  // Content-Type here makes Flask unable to parse uploaded files.
+  if (!(options.body instanceof FormData)) {
+    headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+  }
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(url, { ...options, headers });
 
