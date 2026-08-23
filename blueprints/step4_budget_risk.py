@@ -301,8 +301,6 @@ def generate_risk():
     country = ctx.get("country") or prop.get("country") or "Target Country"
     theme = ctx.get("theme") or prop.get("theme") or "Multi-sector"
     donor = _resolve_donor(prop)
-    logframe_context = json.dumps(prop.get("logframe_data") or {}, ensure_ascii=False)[:8000]
-    narrative_context = json.dumps(prop.get("narrative_data") or {}, ensure_ascii=False)[:8000]
 
     prompt = f"""
 Draft a 5x5 risk matrix for a humanitarian proposal in {country} ({theme}) for donor {donor}.
@@ -364,6 +362,8 @@ def generate_budget():
     country = ctx.get("country") or prop.get("country") or "Target Country"
     theme = ctx.get("theme") or prop.get("theme") or "Multi-sector"
     donor = _resolve_donor(prop)
+    logframe_context = json.dumps(prop.get("logframe_data") or {}, ensure_ascii=False)[:8000]
+    narrative_context = json.dumps(prop.get("narrative_data") or {}, ensure_ascii=False)[:8000]
 
     # Manifest currency / budget ceiling (call-specific rules)
     currency = "USD"
