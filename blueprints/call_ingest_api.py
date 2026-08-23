@@ -38,6 +38,7 @@ try:
         DONORS_DIR,
     )
     from proposal.engine.models import DonorManifest
+    from proposal.engine.yaml_rules import invalidate_rule_cache
 
 except ImportError:
     from config import DB_PATH
@@ -49,6 +50,7 @@ except ImportError:
         DONORS_DIR,
     )
     from engine.models import DonorManifest
+    from engine.yaml_rules import invalidate_rule_cache
 logger = logging.getLogger(__name__)
 
 call_ingest_bp = Blueprint("call_ingest", __name__, url_prefix="/api/calls")
@@ -359,10 +361,9 @@ def update_draft(draft_id: str):
 
     # Validate shape early (before store) — catches broken user edits
     try:
-        return jsonify({"error": f"Manifest validation failed: {e}"}), 422
-
-    except Exception as e:
         DonorManifest(**manifest)
+    except Exception as e:
+        return jsonify({"error": f"Manifest validation failed: {e}"}), 422
     conn = _conn()
     try:
         cur = conn.execute(
@@ -451,10 +452,10 @@ def publish_draft(draft_id: str):
     manifest = json.loads(d["manifest_json"] or "{}")
 
     try:
-        return jsonify({"error": f"Manifest validation failed: {e}"}), 422
-
-    except Exception as e:
         path = save_manifest(d["call_id"], manifest)
+    except (TypeError, ValueError) as e:
+        return jsonify({"error": f"Manifest validation failed: {e}"}), 422
+    invalidate_rule_cache(d["call_id"])
     conn = _conn()
     try:
         conn.execute(

@@ -30,6 +30,11 @@ import yaml
 
 from engine.models import DEFAULT_WEIGHTS, DonorManifest, iter_indicator_entries
 
+try:
+    from proposal.config import BUILTIN_DONORS_DIR, DONORS_DIR
+except ImportError:
+    from config import BUILTIN_DONORS_DIR, DONORS_DIR
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_DONOR_ID = "ocha_cbpf"
@@ -105,11 +110,29 @@ class YamlDonorRuleLoader:
     """Load and validate root-level donor manifests from /donors/*.yaml."""
 
     def __init__(self, donors_dir: Optional[Path] = None) -> None:
-        self.donors_dir = Path(donors_dir) if donors_dir else Path(__file__).resolve().parent.parent / "donors"
+        if donors_dir is not None:
+            self.donors_dirs = (Path(donors_dir),)
+        else:
+            self.donors_dirs = tuple(dict.fromkeys((Path(DONORS_DIR), Path(BUILTIN_DONORS_DIR))))
+        # Backward-compatible attribute for callers that inspect the primary
+        # (writable/published) directory.
+        self.donors_dir = self.donors_dirs[0]
         self._cache: Dict[str, DonorManifest] = {}
 
     def list_donors(self) -> List[str]:
-        return sorted(p.stem for p in self.donors_dir.glob("*.yaml"))
+        return sorted({p.stem for directory in self.donors_dirs for p in directory.glob("*.yaml")})
+
+    def _manifest_path(self, donor_id: str) -> Optional[Path]:
+        return next(
+            (path for directory in self.donors_dirs if (path := directory / f"{donor_id}.yaml").exists()),
+            None,
+        )
+
+    def invalidate(self, donor_id: Optional[str] = None) -> None:
+        if donor_id is None:
+            self._cache.clear()
+        else:
+            self._cache.pop(donor_id, None)
 
     def load(self, donor_id: str) -> DonorManifest:
         """Load a donor manifest; fall back to default donor on missing file.
@@ -120,11 +143,13 @@ class YamlDonorRuleLoader:
         if donor_id in self._cache:
             return self._cache[donor_id]
 
-        path = self.donors_dir / f"{donor_id}.yaml"
-        if not path.exists():
+        path = self._manifest_path(donor_id)
+        if path is None:
             logger.warning("Donor manifest %s.yaml missing — falling back to %s", donor_id, DEFAULT_DONOR_ID)
             donor_id = DEFAULT_DONOR_ID
-            path = self.donors_dir / f"{donor_id}.yaml"
+            path = self._manifest_path(donor_id)
+        if path is None:
+            raise FileNotFoundError(f"No donor manifest found for {donor_id}")
 
         with open(path, "r", encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
@@ -480,3 +505,9 @@ def get_rule_engine() -> DonorScoringEngine:
         _loader = YamlDonorRuleLoader()
         _engine = DonorScoringEngine(_loader)
     return _engine
+
+
+def invalidate_rule_cache(donor_id: Optional[str] = None) -> None:
+    """Make a newly published manifest visible to the singleton engine."""
+    if _loader is not None:
+        _loader.invalidate(donor_id)

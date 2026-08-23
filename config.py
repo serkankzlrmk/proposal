@@ -27,6 +27,18 @@ DB_PATH = Path(
     or str(BASE_DIR / "data" / "proposal.db")
 )
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", str(BASE_DIR / "output")))
+BUILTIN_DONORS_DIR = BASE_DIR / "donors"
+# Embedded production mounts the Proposal checkout read-only. Human-approved
+# donor manifests therefore live beside proposal.db in the writable data
+# volume, while standalone development keeps the historical repo-local path.
+DONORS_DIR = Path(
+    os.getenv("PROPOSAL_DONORS_DIR")
+    or (
+        str(DB_PATH.parent / "proposal_donors")
+        if os.getenv("PROPOSAL_DB_PATH")
+        else str(BUILTIN_DONORS_DIR)
+    )
+)
 # NOTE: no mkdir at import time — the embedded deployment mounts the proposal
 # repo read-only (:/app/proposal:ro); callers must create OUTPUT_DIR lazily
 # (see typst_engine.compiler._ensure_output_dir).

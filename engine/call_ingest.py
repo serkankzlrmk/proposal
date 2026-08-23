@@ -36,9 +36,12 @@ except ImportError:
 from engine.models import DonorManifest
 from engine.generator import _call_llm
 
-logger = logging.getLogger(__name__)
+try:
+    from proposal.config import DONORS_DIR
+except ImportError:
+    from config import DONORS_DIR
 
-DONORS_DIR = Path(__file__).resolve().parent.parent / "donors"
+logger = logging.getLogger(__name__)
 
 # ── PDF text extraction ───────────────────────────────────────────────────
 def extract_pdf_text(pdf_bytes: bytes, max_chars: int = 120_000) -> str:
@@ -488,6 +491,7 @@ def save_manifest(call_id: str, manifest_dict: Dict[str, Any]) -> Path:
     """
     manifest = DonorManifest(**manifest_dict)  # raises pydantic ValidationError
     slug = re.sub(r"[^a-z0-9_]", "_", call_id.lower())
+    DONORS_DIR.mkdir(parents=True, exist_ok=True)
     path = DONORS_DIR / f"{slug}.yaml"
     path.write_text(_dump_yaml(manifest), encoding="utf-8")
     logger.info("Published donor manifest %s (%s)", slug, path)

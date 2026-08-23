@@ -149,7 +149,8 @@ def test_build_manifest_draft_none_safe():
 
 # ── Publish -> engine pickup ──────────────────────────────────────────────
 def test_save_manifest_and_engine_pickup(tmp_path, monkeypatch):
-    monkeypatch.setattr("engine.call_ingest.DONORS_DIR", tmp_path)
+    published_dir = tmp_path / "published" / "donors"
+    monkeypatch.setattr("engine.call_ingest.DONORS_DIR", published_dir)
     draft = build_manifest_draft("new_donor_2026", "New Donor 2026", {
         "summary": "Test call",
         "hard_gates": {"min_displaced_ratio": 0.5},
@@ -158,8 +159,9 @@ def test_save_manifest_and_engine_pickup(tmp_path, monkeypatch):
     })
     path = save_manifest("new_donor_2026", draft)
     assert path.exists()
+    assert path.parent == published_dir
 
-    loader = YamlDonorRuleLoader(donors_dir=tmp_path)
+    loader = YamlDonorRuleLoader(donors_dir=published_dir)
     assert "new_donor_2026" in loader.list_donors()
     m = loader.load("new_donor_2026")
     assert m.overhead_cap_percent == 8.0
@@ -401,7 +403,8 @@ def test_extract_document_text_formats():
 
 
 def test_api_publish_then_engine_scores(client, tmp_path, monkeypatch):
-    monkeypatch.setattr("engine.call_ingest.DONORS_DIR", tmp_path)
+    published_dir = tmp_path / "published" / "donors"
+    monkeypatch.setattr("engine.call_ingest.DONORS_DIR", published_dir)
     pdf = make_pdf_bytes(CALL_TEXT)
     r = client.post("/api/calls/ingest", data={
         "file": (io.BytesIO(pdf), "call.pdf"),
@@ -415,8 +418,26 @@ def test_api_publish_then_engine_scores(client, tmp_path, monkeypatch):
     assert r2.json["status"] == "published"
 
     # manifest written + engine sees it
-    loader = YamlDonorRuleLoader(donors_dir=tmp_path)
+    loader = YamlDonorRuleLoader(donors_dir=published_dir)
     assert "api_pub_call" in loader.list_donors()
+
+
+def test_api_update_rejects_invalid_manifest(client):
+    pdf = make_pdf_bytes(CALL_TEXT)
+    response = client.post("/api/calls/ingest", data={
+        "file": (io.BytesIO(pdf), "call.pdf"),
+        "call_id": "invalid_update_call",
+        "display_name": "Invalid Update Call",
+    }, content_type="multipart/form-data")
+    draft_id = response.json["draft_id"]
+
+    update = client.put(
+        f"/api/calls/drafts/{draft_id}",
+        json={"manifest": {"donor_id": None}},
+    )
+
+    assert update.status_code == 422
+    assert "Manifest validation failed" in update.json["error"]
 
 
 def test_api_reject_draft(client):
