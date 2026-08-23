@@ -1568,6 +1568,32 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
 
   // ── Event Bindings ────────────────────────────────────────────────────────
   function setupEventListeners() {
+    // Auth overlay: "Sign in with Google" — direct Firebase popup (no redirect
+    // to /app needed; same Firebase project, token lands in shared localStorage).
+    const authBtn = document.getElementById('auth-signin-btn');
+    if (authBtn) {
+      authBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        if (window.signInWithGooglePopup) {
+          authBtn.disabled = true;
+          try {
+            await window.signInWithGooglePopup();
+            const overlay = document.getElementById('auth-overlay');
+            if (overlay) overlay.classList.add('hidden');
+            await renderLanding();
+          } catch (err) {
+            console.error('Google sign-in failed:', err);
+            notify('Sign-in failed: ' + (err.message || 'unknown error'), 'danger');
+          } finally {
+            authBtn.disabled = false;
+          }
+        } else {
+          // Firebase not loaded yet — fall back to Sightline sign-in page.
+          window.location.href = '/app';
+        }
+      });
+    }
+
     // Step navigation
     el.stepBtns.forEach(btn => {
       btn.addEventListener('click', () => setStep(btn.dataset.step));
@@ -1699,18 +1725,17 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
   }
 
   // ── Auth gate ──────────────────────────────────────────────────────────────────
-  // Check if user is authenticated via Sightline's shared Firebase token.
-  // Soft approach: try auth, but allow through on failure so the UI loads.
-  // API calls will show the overlay if they get 401.
+  // Check if user is authenticated via shared Firebase (same project as Sightline).
+  // proposal-auth.js provides window.refreshIdToken / signInWithGooglePopup.
   async function checkAuth() {
     const token = window.__idToken || localStorage.getItem('id_token');
     const overlay = document.getElementById('auth-overlay');
 
     if (!token) {
-      // No token — show login overlay but still allow app to load
-      // (API calls will handle 401 gracefully)
-      if (overlay) overlay.classList.remove('hidden');
-      // Still try to load — donors and published data work without auth
+      // No token — if Firebase SDK is ready, try silent re-auth first.
+      if (window.__firebaseAuthReady && !(await trySilentAuth())) {
+        showAuthOverlay();
+      }
       return true;
     }
 
@@ -1726,14 +1751,13 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
         if (overlay) overlay.classList.add('hidden');
         return true;
       } else {
-        // Token expired or invalid — try refresh via Sightline's auth.js
+        // Token expired or invalid — try refresh (works on /proposal and /app)
         if (window.refreshIdToken) {
           try {
             const fresh = await window.refreshIdToken();
             if (fresh) {
               window.__idToken = fresh;
               localStorage.setItem('id_token', fresh);
-              // Retry with fresh token
               const res2 = await fetch('/api/auth/me', {
                 headers: { 'Authorization': 'Bearer ' + fresh }
               });
@@ -1746,8 +1770,8 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
             }
           } catch (e) { /* refresh failed */ }
         }
-        // No refresh possible — show login overlay but still allow app to load
-        if (overlay) overlay.classList.remove('hidden');
+        // No refresh — show overlay but still allow the app shell to render
+        showAuthOverlay();
         return true;
       }
     } catch (e) {
@@ -1755,6 +1779,36 @@ const BASE = window.PROPOSAL_BASE_PATH || '';
       if (overlay) overlay.classList.add('hidden');
       return true;
     }
+  }
+
+  function showAuthOverlay() {
+    const overlay = document.getElementById('auth-overlay');
+    if (overlay) overlay.classList.remove('hidden');
+  }
+
+  // Silent re-auth: if Firebase already knows this user (signed in on /app),
+  // grab a fresh token without showing anything.
+  async function trySilentAuth() {
+    try {
+      if (typeof window.firebase !== 'undefined' && window.firebase.auth) {
+        const auth = window.firebase.auth();
+        if (auth.currentUser) {
+          const tok = await auth.currentUser.getIdToken(true);
+          localStorage.setItem('id_token', tok);
+          window.__idToken = tok;
+          const res = await fetch('/api/auth/me', {
+            headers: { 'Authorization': 'Bearer ' + tok }
+          });
+          if (res.ok) {
+            window.__currentUser = await res.json();
+            const overlay = document.getElementById('auth-overlay');
+            if (overlay) overlay.classList.add('hidden');
+            return true;
+          }
+        }
+      }
+    } catch (e) { /* silent auth failed */ }
+    return false;
   }
 
   // ── Initialize App ────────────────────────────────────────────────────────

@@ -492,6 +492,10 @@
 
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
 
+  <!-- Firebase auth (standalone — same Firebase project as Sightline) -->
+  <script src="{{ url_for('static', filename='firebase-config.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/proposal-auth.js') }}"></script>
+
   <!-- Main Vanilla JS Coordinator -->
   <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
