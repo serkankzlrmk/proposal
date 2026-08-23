@@ -55,7 +55,11 @@ def _template_config():
         max((path.stat().st_mtime_ns for path in asset_paths if path.exists()), default=0),
         "x",
     )
-    return {"PROPOSAL_BASE_PATH": PROPOSAL_BASE_PATH, "ASSET_VERSION": asset_version}
+    return {
+        "PROPOSAL_BASE_PATH": PROPOSAL_BASE_PATH,
+        "ASSET_VERSION": asset_version,
+        "FIREBASE_CONFIG_URL": f"{_static_url}/firebase-config.js",
+    }
 
 app = Flask(
     __name__,

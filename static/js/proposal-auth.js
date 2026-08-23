@@ -61,8 +61,7 @@
     window.refreshIdToken = async function () {
       const cur = auth.currentUser;
       if (!cur) {
-        // Not signed in here — rely on Sightline's persisted token, if any.
-        return localStorage.getItem('id_token') || '';
+        return '';
       }
       const t = await cur.getIdToken(true);
       localStorage.setItem('id_token', t);
@@ -104,8 +103,9 @@
             console.warn('proposal-auth: token refresh failed', e);
           }
         } else {
-          localStorage.removeItem('id_token');
-          window.__idToken = '';
+          // Firebase persistence can lag behind a valid token written by
+          // /app. Keep it until app.js verifies it with /api/auth/me.
+          window.__idToken = localStorage.getItem('id_token') || '';
           window.__currentUser = null;
         }
         window.dispatchEvent(new Event('auth-state-changed'));
