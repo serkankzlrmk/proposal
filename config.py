@@ -55,8 +55,8 @@ USAGE_LEDGER_PATH = Path(
 # LLM Configuration (Compatible with OpenRouter / OpenAI)
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://openrouter.ai/api/v1")
-LLM_MODEL = os.getenv("LLM_MODEL", "google/gemini-2.5-flash")
-VERIFIER_MODEL = os.getenv("VERIFIER_MODEL", "google/gemini-2.5-pro")
+LLM_MODEL = os.getenv("LLM_MODEL", "google/gemini-3.8-flash")
+VERIFIER_MODEL = os.getenv("VERIFIER_MODEL", "google/gemini-3.1-pro-preview")
 
 # Secret key for Flask sessions.
 # No hardcoded fallback: a public default would let anyone forge sessions.

@@ -29,8 +29,8 @@ LEDGER_PATH = Path(USAGE_LEDGER_PATH)
 # Rough per-1K-token cost table (USD) for common OpenRouter models.
 # Used only when the provider does not report cost; estimates, not billing.
 MODEL_COST_PER_1K = {
-    "google/gemini-2.5-flash": {"input": 0.0003, "output": 0.0025},
-    "google/gemini-2.5-pro": {"input": 0.00125, "output": 0.01},
+    "google/gemini-3.8-flash": {"input": 0.000825, "output": 0.004125},
+    "google/gemini-3.1-pro-preview": {"input": 0.002, "output": 0.012},
     "default": {"input": 0.0005, "output": 0.002},
 }
 
